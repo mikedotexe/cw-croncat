@@ -341,11 +341,11 @@ pub struct SlotHashesResponse {
     pub time_task_hash: Vec<String>,
 }
 
-#[cw_serde]
-pub struct SlotIdsResponse {
-    pub time_ids: Vec<u64>,
-    pub block_ids: Vec<u64>,
-}
+// #[cw_serde]
+// pub struct SlotIdsResponse {
+//     pub time_ids: Vec<u64>,
+//     pub block_ids: Vec<u64>,
+// }
 
 #[cw_serde]
 pub enum SlotType {

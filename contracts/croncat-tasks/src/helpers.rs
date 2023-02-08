@@ -8,7 +8,7 @@ use croncat_sdk_tasks::types::{
 use cw20::{Cw20CoinVerified, Cw20ExecuteMsg};
 
 use crate::{
-    state::{tasks_map, BLOCK_SLOTS, EVENTED_TASKS_LOOKUP, TASKS_TOTAL, TIME_SLOTS},
+    state::{tasks_map, BLOCK_SLOTS, EVENTED_TASKS_LOOKUP, TASKS_TOTAL, TASK_SLOT, TIME_SLOTS},
     ContractError,
 };
 
@@ -215,43 +215,13 @@ pub(crate) fn remove_task(
             }
         }
     } else if is_block {
-        let blocks = BLOCK_SLOTS
-            .range(storage, None, None, Order::Ascending)
-            .collect::<StdResult<Vec<_>>>()?;
-        for (bid, mut block_hashes) in blocks {
-            let mut found = false;
-            block_hashes.retain(|h| {
-                found = h == hash;
-                !found
-            });
-            if found {
-                if block_hashes.is_empty() {
-                    BLOCK_SLOTS.remove(storage, bid);
-                } else {
-                    BLOCK_SLOTS.save(storage, bid, &block_hashes)?;
-                }
-                break;
-            }
-        }
+        let slot_id = TASK_SLOT.load(storage, hash)?;
+        BLOCK_SLOTS.remove(storage, (slot_id, hash));
+        TASK_SLOT.remove(storage, hash);
     } else {
-        let time_buckets = TIME_SLOTS
-            .range(storage, None, None, Order::Ascending)
-            .collect::<StdResult<Vec<_>>>()?;
-        for (tid, mut time_hashes) in time_buckets {
-            let mut found = false;
-            time_hashes.retain(|h| {
-                found = h == hash;
-                !found
-            });
-            if found {
-                if time_hashes.is_empty() {
-                    TIME_SLOTS.remove(storage, tid);
-                } else {
-                    TIME_SLOTS.save(storage, tid, &time_hashes)?;
-                }
-                break;
-            }
-        }
+        let slot_id = TASK_SLOT.load(storage, hash)?;
+        TIME_SLOTS.remove(storage, (slot_id, hash));
+        TASK_SLOT.remove(storage, hash);
     }
 
     Ok(())

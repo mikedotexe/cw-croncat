@@ -1,20 +1,20 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Order, Response, StdResult,
-    Uint64,
+    to_binary, Attribute, Binary, Deps, DepsMut, Empty, Env, MessageInfo, Order, Response,
+    StdResult, Uint64,
 };
 use croncat_sdk_core::internal_messages::agents::AgentOnTaskCreated;
 use croncat_sdk_core::internal_messages::manager::{ManagerCreateTaskBalance, ManagerRemoveTask};
 use croncat_sdk_core::internal_messages::tasks::{TasksRemoveTaskByManager, TasksRescheduleTask};
 use croncat_sdk_tasks::msg::UpdateConfigMsg;
 use croncat_sdk_tasks::types::{
-    Config, CurrentTaskInfoResponse, Interval, SlotHashesResponse, SlotIdsResponse,
-    SlotTasksTotalResponse, SlotType, Task, TaskInfo, TaskRequest, TaskResponse,
+    Config, CurrentTaskInfoResponse, Interval, SlotHashesResponse, SlotTasksTotalResponse,
+    SlotType, Task, TaskInfo, TaskRequest, TaskResponse,
 };
 use cw2::set_contract_version;
 use cw20::Cw20CoinVerified;
-use cw_storage_plus::Bound;
+use cw_storage_plus::{Bound, PrefixBound};
 
 use crate::error::ContractError;
 use crate::helpers::{
@@ -24,7 +24,7 @@ use crate::helpers::{
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{
     tasks_map, BLOCK_SLOTS, CONFIG, EVENTED_TASKS_LOOKUP, LAST_TASK_CREATION, TASKS_TOTAL,
-    TIME_SLOTS,
+    TASK_SLOT, TIME_SLOTS,
 };
 
 const CONTRACT_NAME: &str = "crate:croncat-tasks";
@@ -167,60 +167,18 @@ fn execute_reschedule_task(
         // NOTE: If task is evented, we dont want to "schedule" inside slots
         // but we also dont want to remove unless it was Interval::Once
         if next_id != 0 && !task.is_evented() && task.interval != Interval::Once {
-            // Get previous task hashes in slot, add as needed
-            let update_vec_data = |d: Option<Vec<Vec<u8>>>| -> StdResult<Vec<Vec<u8>>> {
-                match d {
-                    // has some data, simply push new hash
-                    Some(data) => {
-                        let mut s = data;
-                        s.push(task_hash);
-                        Ok(s)
-                    }
-                    // No data, push new vec & hash
-                    None => Ok(vec![task_hash]),
-                }
-            };
             // Based on slot kind, put into block or cron slots
+            let slot_id = TASK_SLOT.load(deps.storage, &task_hash)?;
             match slot_kind {
                 SlotType::Block => {
-                    BLOCK_SLOTS.update(deps.storage, next_id, update_vec_data)?;
-                    // Don't forget to pop finished task
-                    let mut block_slot: Vec<(u64, Vec<Vec<u8>>)> = BLOCK_SLOTS
-                        .range(
-                            deps.storage,
-                            None,
-                            Some(Bound::inclusive(env.block.height)),
-                            Order::Ascending,
-                        )
-                        .take(1)
-                        .collect::<StdResult<_>>()?;
-                    let mut slot = block_slot.pop().unwrap();
-                    slot.1.pop();
-                    if slot.1.is_empty() {
-                        BLOCK_SLOTS.remove(deps.storage, slot.0)
-                    } else {
-                        BLOCK_SLOTS.save(deps.storage, slot.0, &slot.1)?;
-                    }
+                    BLOCK_SLOTS.remove(deps.storage, (slot_id, &task_hash));
+                    BLOCK_SLOTS.save(deps.storage, (next_id, &task_hash), &Empty {})?;
+                    TASK_SLOT.save(deps.storage, &task_hash, &next_id)?;
                 }
                 SlotType::Cron => {
-                    TIME_SLOTS.update(deps.storage, next_id, update_vec_data)?;
-                    // Don't forget to pop finished task
-                    let mut time_slot: Vec<(u64, Vec<Vec<u8>>)> = TIME_SLOTS
-                        .range(
-                            deps.storage,
-                            None,
-                            Some(Bound::inclusive(env.block.time.nanos())),
-                            Order::Ascending,
-                        )
-                        .take(1)
-                        .collect::<StdResult<_>>()?;
-                    let mut slot = time_slot.pop().unwrap();
-                    slot.1.pop();
-                    if slot.1.is_empty() {
-                        TIME_SLOTS.remove(deps.storage, slot.0)
-                    } else {
-                        TIME_SLOTS.save(deps.storage, slot.0, &slot.1)?;
-                    }
+                    TIME_SLOTS.remove(deps.storage, (slot_id, &task_hash));
+                    TIME_SLOTS.save(deps.storage, (next_id, &task_hash), &Empty {})?;
+                    TASK_SLOT.save(deps.storage, &task_hash, &next_id)?;
                 }
             }
         } else if !task.is_evented() {
@@ -400,12 +358,13 @@ fn execute_create_task(
         // Only scheduled tasks get put into slots
         match slot_kind {
             SlotType::Block => {
-                BLOCK_SLOTS.update(deps.storage, next_id, update_vec_data)?;
+                BLOCK_SLOTS.save(deps.storage, (next_id, &hash_vec), &Empty {})?;
             }
             SlotType::Cron => {
-                TIME_SLOTS.update(deps.storage, next_id, update_vec_data)?;
+                TIME_SLOTS.save(deps.storage, (next_id, &hash_vec), &Empty {})?;
             }
         }
+        TASK_SLOT.save(deps.storage, &hash_vec, &next_id)?;
         attributes.push(Attribute::new("slot_id", next_id.to_string()));
         attributes.push(Attribute::new("slot_kind", slot_kind.to_string()));
     }
@@ -463,9 +422,6 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::Task { task_hash } => to_binary(&query_task(deps, task_hash)?),
         QueryMsg::TaskHash { task } => to_binary(&query_task_hash(deps, *task)?),
         QueryMsg::SlotHashes { slot } => to_binary(&query_slot_hashes(deps, slot)?),
-        QueryMsg::SlotIds { from_index, limit } => {
-            to_binary(&query_slot_ids(deps, from_index, limit)?)
-        }
         QueryMsg::SlotTasksTotal { offset } => {
             to_binary(&query_slot_tasks_total(deps, env, offset)?)
         }
@@ -492,8 +448,9 @@ fn query_slot_tasks_total(
     if let Some(off) = offset {
         let config = CONFIG.load(deps.storage)?;
         let block_tasks = BLOCK_SLOTS
-            .may_load(deps.storage, env.block.height + off)?
-            .unwrap_or_default()
+            .prefix(env.block.height + off)
+            .keys(deps.storage, None, None, Order::Ascending)
+            .collect::<StdResult<Vec<Vec<u8>>>>()?
             .len() as u64;
         let evented_tasks = EVENTED_TASKS_LOOKUP
             .may_load(deps.storage, env.block.height + off)?
@@ -504,11 +461,9 @@ fn query_slot_tasks_total(
         let current_block_slot =
             current_block_ts.saturating_sub(current_block_ts % config.slot_granularity_time);
         let cron_tasks = TIME_SLOTS
-            .may_load(
-                deps.storage,
-                current_block_slot + config.slot_granularity_time * off,
-            )?
-            .unwrap_or_default()
+            .prefix(current_block_slot + config.slot_granularity_time * off)
+            .keys(deps.storage, None, None, Order::Ascending)
+            .collect::<StdResult<Vec<Vec<u8>>>>()?
             .len() as u64;
         Ok(SlotTasksTotalResponse {
             block_tasks,
@@ -516,19 +471,16 @@ fn query_slot_tasks_total(
             evented_tasks,
         })
     } else {
-        let block_slots: Vec<(u64, Vec<Vec<u8>>)> = BLOCK_SLOTS
-            .range(
+        let block_slots: Vec<((u64, Vec<u8>), Empty)> = BLOCK_SLOTS
+            .prefix_range(
                 deps.storage,
                 None,
-                Some(Bound::inclusive(env.block.height)),
+                Some(PrefixBound::inclusive(env.block.height)),
                 Order::Ascending,
             )
             .collect::<StdResult<_>>()?;
 
-        let block_tasks = block_slots
-            .iter()
-            .fold(0, |acc, (_, hashes)| acc + hashes.len()) as u64;
-
+        let block_tasks = block_slots.len() as u64;
         let evented_task_list: Vec<(u64, Vec<Vec<u8>>)> = EVENTED_TASKS_LOOKUP
             .range(
                 deps.storage,
@@ -542,18 +494,16 @@ fn query_slot_tasks_total(
             .iter()
             .fold(0, |acc, (_, hashes)| acc + hashes.len()) as u64;
 
-        let time_slot: Vec<(u64, Vec<Vec<u8>>)> = TIME_SLOTS
-            .range(
+        let time_slot: Vec<((u64, Vec<u8>), Empty)> = TIME_SLOTS
+            .prefix_range(
                 deps.storage,
                 None,
-                Some(Bound::inclusive(env.block.time.nanos())),
+                Some(PrefixBound::inclusive(env.block.time.nanos())),
                 Order::Ascending,
             )
             .collect::<StdResult<_>>()?;
 
-        let cron_tasks = time_slot
-            .iter()
-            .fold(0, |acc, (_, hashes)| acc + hashes.len()) as u64;
+        let cron_tasks = time_slot.len() as u64;
         Ok(SlotTasksTotalResponse {
             block_tasks,
             cron_tasks,
@@ -566,31 +516,31 @@ fn query_slot_tasks_total(
 /// NOTE: This prioritizes blocks over timestamps
 fn query_current_task(deps: Deps, env: Env) -> StdResult<TaskResponse> {
     let config = CONFIG.load(deps.storage)?;
-    let mut block_slot: Vec<(u64, Vec<Vec<u8>>)> = BLOCK_SLOTS
-        .range(
+    let mut block_slot: Vec<((u64, Vec<u8>), Empty)> = BLOCK_SLOTS
+        .prefix_range(
             deps.storage,
             None,
-            Some(Bound::inclusive(env.block.height)),
+            Some(PrefixBound::inclusive(env.block.height)),
             Order::Ascending,
         )
         .take(1)
         .collect::<StdResult<_>>()?;
     if !block_slot.is_empty() {
-        let task_hash = block_slot.pop().unwrap().1.pop().unwrap();
+        let task_hash = block_slot.pop().unwrap().0 .1;
         let task = tasks_map().load(deps.storage, &task_hash)?;
         Ok(task.into_response(&config.chain_name))
     } else {
-        let mut time_slot: Vec<(u64, Vec<Vec<u8>>)> = TIME_SLOTS
-            .range(
+        let mut time_slot: Vec<((u64, Vec<u8>), Empty)> = TIME_SLOTS
+            .prefix_range(
                 deps.storage,
                 None,
-                Some(Bound::inclusive(env.block.time.nanos())),
+                Some(PrefixBound::inclusive(env.block.time.nanos())),
                 Order::Ascending,
             )
             .take(1)
             .collect::<StdResult<_>>()?;
         if !time_slot.is_empty() {
-            let task_hash = time_slot.pop().unwrap().1.pop().unwrap();
+            let task_hash = time_slot.pop().unwrap().0 .1;
             let task = tasks_map().load(deps.storage, &task_hash)?;
             Ok(task.into_response(&config.chain_name))
         } else {
@@ -787,35 +737,67 @@ fn query_slot_hashes(deps: Deps, slot: Option<u64>) -> StdResult<SlotHashesRespo
 
     // Check if slot was supplied, otherwise get the next slots for block and time
     if let Some(id) = slot {
-        block_hashes = BLOCK_SLOTS.may_load(deps.storage, id)?.unwrap_or_default();
+        block_hashes = BLOCK_SLOTS
+            .prefix_range(
+                deps.storage,
+                Some(PrefixBound::inclusive(id)),
+                Some(PrefixBound::inclusive(id)),
+                Order::Ascending,
+            )
+            .map(|res| res.map(|item| item.0 .1))
+            .collect::<StdResult<Vec<_>>>()?;
         if !block_hashes.is_empty() {
             block_id = id;
         }
-        time_hashes = TIME_SLOTS.may_load(deps.storage, id)?.unwrap_or_default();
+        time_hashes = TIME_SLOTS
+            .prefix_range(
+                deps.storage,
+                Some(PrefixBound::inclusive(id)),
+                Some(PrefixBound::inclusive(id)),
+                Order::Ascending,
+            )
+            .map(|res| res.map(|item| item.0 .1))
+            .collect::<StdResult<Vec<_>>>()?;
         if !time_hashes.is_empty() {
             time_id = id;
         }
     } else {
-        let time: Vec<(u64, _)> = TIME_SLOTS
-            .range(deps.storage, None, None, Order::Ascending)
+        let time_ids: Vec<u64> = TIME_SLOTS
+            .prefix_range(deps.storage, None, None, Order::Ascending)
             .take(1)
-            .collect::<StdResult<Vec<(u64, _)>>>()?;
+            .map(|res| res.map(|x| x.0 .0))
+            .collect::<StdResult<Vec<u64>>>()?;
 
-        if !time.is_empty() {
-            let slot = time[0].clone();
-            time_id = slot.0;
-            time_hashes = slot.1;
+        if !time_ids.is_empty() {
+            time_id = time_ids[0];
+            time_hashes = TIME_SLOTS
+                .prefix_range(
+                    deps.storage,
+                    Some(PrefixBound::inclusive(time_id)),
+                    Some(PrefixBound::inclusive(time_id)),
+                    Order::Ascending,
+                )
+                .map(|res| res.map(|item| item.0 .1))
+                .collect::<StdResult<Vec<_>>>()?;
         }
 
-        let block: Vec<(u64, _)> = BLOCK_SLOTS
-            .range(deps.storage, None, None, Order::Ascending)
+        let block_ids: Vec<u64> = BLOCK_SLOTS
+            .prefix_range(deps.storage, None, None, Order::Ascending)
             .take(1)
-            .collect::<StdResult<Vec<(u64, _)>>>()?;
+            .map(|res| res.map(|x| x.0 .0))
+            .collect::<StdResult<Vec<u64>>>()?;
 
-        if !block.is_empty() {
-            let slot = block[0].clone();
-            block_id = slot.0;
-            block_hashes = slot.1;
+        if !block_ids.is_empty() {
+            block_id = block_ids[0];
+            block_hashes = BLOCK_SLOTS
+                .prefix_range(
+                    deps.storage,
+                    Some(PrefixBound::inclusive(block_id)),
+                    Some(PrefixBound::inclusive(block_id)),
+                    Order::Ascending,
+                )
+                .map(|res| res.map(|item| item.0 .1))
+                .collect::<StdResult<Vec<_>>>()?;
         }
     }
 
@@ -837,27 +819,28 @@ fn query_slot_hashes(deps: Deps, slot: Option<u64>) -> StdResult<SlotHashesRespo
     })
 }
 
-fn query_slot_ids(
-    deps: Deps,
-    from_index: Option<u64>,
-    limit: Option<u64>,
-) -> StdResult<SlotIdsResponse> {
-    let from_index = from_index.unwrap_or_default();
-    let limit = limit.unwrap_or(100);
+// TODO?:
+// fn query_slot_ids(
+//     deps: Deps,
+//     from_index: Option<u64>,
+//     limit: Option<u64>,
+// ) -> StdResult<SlotIdsResponse> {
+//     let from_index = from_index.unwrap_or_default();
+//     let limit = limit.unwrap_or(100);
 
-    let time_ids = TIME_SLOTS
-        .keys(deps.storage, None, None, Order::Ascending)
-        .skip(from_index as usize)
-        .take(limit as usize)
-        .collect::<StdResult<_>>()?;
-    let block_ids = BLOCK_SLOTS
-        .keys(deps.storage, None, None, Order::Ascending)
-        .skip(from_index as usize)
-        .take(limit as usize)
-        .collect::<StdResult<_>>()?;
+//     let time_ids = TIME_SLOTS
+//         .prefix_range(deps.storage, None, None, Order::Ascending)
+//         .skip(from_index as usize)
+//         .take(limit as usize)
+//         .collect::<StdResult<_>>()?;
+//     let block_ids = BLOCK_SLOTS
+//         .keys(deps.storage, None, None, Order::Ascending)
+//         .skip(from_index as usize)
+//         .take(limit as usize)
+//         .collect::<StdResult<_>>()?;
 
-    Ok(SlotIdsResponse {
-        time_ids,
-        block_ids,
-    })
-}
+//     Ok(SlotIdsResponse {
+//         time_ids,
+//         block_ids,
+//     })
+// }

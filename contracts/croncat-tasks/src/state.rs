@@ -1,4 +1,4 @@
-use cosmwasm_std::{Addr, Timestamp, Uint64};
+use cosmwasm_std::{Addr, Empty, Timestamp, Uint64};
 use croncat_sdk_tasks::types::{Boundary, Config, Task};
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 
@@ -8,11 +8,14 @@ pub const CONFIG: Item<Config> = Item::new("config");
 pub const TASKS_TOTAL: Item<u64> = Item::new("tasks_total");
 
 /// Timestamps can be grouped into slot buckets (1-60 second buckets) for easier agent handling
-pub const TIME_SLOTS: Map<u64, Vec<Vec<u8>>> = Map::new("time_slots");
+pub const TIME_SLOTS: Map<(u64, &[u8]), Empty> = Map::new("time_slots");
 
 /// Block slots allow for grouping of tasks at a specific block height,
 /// this is done instead of forcing a block height into a range of timestamps for reliability
-pub const BLOCK_SLOTS: Map<u64, Vec<Vec<u8>>> = Map::new("block_slots");
+pub const BLOCK_SLOTS: Map<(u64, &[u8]), Empty> = Map::new("block_slots");
+
+/// Slot of this task_hash, so we can safely remove or reschedule it after proxy_call
+pub const TASK_SLOT: Map<&[u8], u64> = Map::new("task_slot");
 
 /// Evented tasks, to keep track of tasks needing "check_result" to trigger tx
 /// key: Boundary Start - either height or time :: defaults to 0

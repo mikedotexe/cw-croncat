@@ -121,12 +121,12 @@ pub enum TasksQueryMsg {
     /// Get slot hashes by given slot
     #[returns(crate::types::SlotHashesResponse)]
     SlotHashes { slot: Option<u64> },
-    /// Get active slots
-    #[returns(crate::types::SlotIdsResponse)]
-    SlotIds {
-        from_index: Option<u64>,
-        limit: Option<u64>,
-    },
+    // /// Get active slots
+    // #[returns(crate::types::SlotIdsResponse)]
+    // SlotIds {
+    //     from_index: Option<u64>,
+    //     limit: Option<u64>,
+    // },
     #[returns(crate::types::SlotTasksTotalResponse)]
     SlotTasksTotal { offset: Option<u64> },
 }
