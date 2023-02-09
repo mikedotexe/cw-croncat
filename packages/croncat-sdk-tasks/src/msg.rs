@@ -90,11 +90,6 @@ pub enum TasksQueryMsg {
         from_index: Option<u64>,
         limit: Option<u64>,
     },
-    #[returns(Vec<u64>)]
-    EventedIds {
-        from_index: Option<u64>,
-        limit: Option<u64>,
-    },
     #[returns(Vec<String>)]
     EventedHashes {
         id: Option<u64>,
@@ -121,12 +116,6 @@ pub enum TasksQueryMsg {
     /// Get slot hashes by given slot
     #[returns(crate::types::SlotHashesResponse)]
     SlotHashes { slot: Option<u64> },
-    // /// Get active slots
-    // #[returns(crate::types::SlotIdsResponse)]
-    // SlotIds {
-    //     from_index: Option<u64>,
-    //     limit: Option<u64>,
-    // },
     #[returns(crate::types::SlotTasksTotalResponse)]
     SlotTasksTotal { offset: Option<u64> },
 }

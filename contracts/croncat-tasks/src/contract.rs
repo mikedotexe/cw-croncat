@@ -387,9 +387,6 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::CurrentTaskInfo {} => to_binary(&query_current_task_info(deps, env)?),
         QueryMsg::CurrentTask {} => to_binary(&query_current_task(deps, env)?),
         QueryMsg::Tasks { from_index, limit } => to_binary(&query_tasks(deps, from_index, limit)?),
-        QueryMsg::EventedIds { from_index, limit } => {
-            to_binary(&query_evented_ids(deps, from_index, limit)?)
-        }
         QueryMsg::EventedHashes {
             id,
             from_index,
@@ -613,25 +610,6 @@ fn query_evented_tasks(
     Ok(all_tasks)
 }
 
-fn query_evented_ids(
-    deps: Deps,
-    from_index: Option<u64>,
-    limit: Option<u64>,
-) -> StdResult<Vec<u64>> {
-    let from_index = from_index.unwrap_or_default();
-    let limit = limit.unwrap_or(100);
-
-    let evented_ids = EVENTED_TASKS_LOOKUP
-        .range(deps.storage, None, None, Order::Ascending)
-        .skip(from_index as usize)
-        .take(limit as usize)
-        // TODO?: if we really need this method, better to use MultiIndex here
-        .map(|res| res.map(|v| v.0 .0))
-        .collect::<StdResult<_>>()?;
-
-    Ok(evented_ids)
-}
-
 fn query_evented_hashes(
     deps: Deps,
     id: Option<u64>,
@@ -779,29 +757,3 @@ fn query_slot_hashes(deps: Deps, slot: Option<u64>) -> StdResult<SlotHashesRespo
         time_task_hash,
     })
 }
-
-// TODO?:
-// fn query_slot_ids(
-//     deps: Deps,
-//     from_index: Option<u64>,
-//     limit: Option<u64>,
-// ) -> StdResult<SlotIdsResponse> {
-//     let from_index = from_index.unwrap_or_default();
-//     let limit = limit.unwrap_or(100);
-
-//     let time_ids = TIME_SLOTS
-//         .prefix_range(deps.storage, None, None, Order::Ascending)
-//         .skip(from_index as usize)
-//         .take(limit as usize)
-//         .collect::<StdResult<_>>()?;
-//     let block_ids = BLOCK_SLOTS
-//         .keys(deps.storage, None, None, Order::Ascending)
-//         .skip(from_index as usize)
-//         .take(limit as usize)
-//         .collect::<StdResult<_>>()?;
-
-//     Ok(SlotIdsResponse {
-//         time_ids,
-//         block_ids,
-//     })
-// }

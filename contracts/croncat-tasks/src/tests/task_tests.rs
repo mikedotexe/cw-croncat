@@ -1167,20 +1167,6 @@ fn remove_tasks_with_queries_success() {
         .unwrap();
     let task_hash_cron_with_queries_evented = String::from_vec(res.data.unwrap().0).unwrap();
 
-    let evented_ids: Vec<u64> = app
-        .wrap()
-        .query_wasm_smart(
-            tasks_addr.clone(),
-            &QueryMsg::EventedIds {
-                from_index: None,
-                limit: None,
-            },
-        )
-        .unwrap();
-    // println!("------- evented_ids {:?}", evented_ids);
-    assert_eq!(evented_ids.len(), 1);
-    assert_eq!(evented_ids, [12355]);
-
     let evented_hashes: Vec<String> = app
         .wrap()
         .query_wasm_smart(
