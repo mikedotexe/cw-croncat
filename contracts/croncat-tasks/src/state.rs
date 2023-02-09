@@ -19,7 +19,7 @@ pub const TASK_SLOT: Map<&[u8], u64> = Map::new("task_slot");
 
 /// Evented tasks, to keep track of tasks needing "check_result" to trigger tx
 /// key: Boundary Start - either height or time :: defaults to 0
-pub const EVENTED_TASKS_LOOKUP: Map<u64, Vec<Vec<u8>>> = Map::new("evented_task_lookup");
+pub const EVENTED_TASKS_LOOKUP: Map<(u64, &[u8]), Empty> = Map::new("evented_task_lookup");
 
 /// Last task creation timestamp
 pub const LAST_TASK_CREATION: Item<Timestamp> = Item::new("last_task_creation");

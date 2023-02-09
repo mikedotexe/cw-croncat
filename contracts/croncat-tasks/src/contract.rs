@@ -14,7 +14,7 @@ use croncat_sdk_tasks::types::{
 };
 use cw2::set_contract_version;
 use cw20::Cw20CoinVerified;
-use cw_storage_plus::{Bound, PrefixBound};
+use cw_storage_plus::PrefixBound;
 
 use crate::error::ContractError;
 use crate::helpers::{
@@ -337,22 +337,8 @@ fn execute_create_task(
         None => Ok(item.clone()),
     })?;
 
-    // Get previous task hashes in slot, add as needed
-    let update_vec_data = |d: Option<Vec<Vec<u8>>>| -> StdResult<Vec<Vec<u8>>> {
-        match d {
-            // has some data, simply push new hash
-            Some(data) => {
-                let mut s = data;
-                s.push(hash_vec.clone());
-                Ok(s)
-            }
-            // No data, push new vec & hash
-            None => Ok(vec![hash_vec.clone()]),
-        }
-    };
-
     if event_based {
-        EVENTED_TASKS_LOOKUP.update(deps.storage, next_id, update_vec_data)?;
+        EVENTED_TASKS_LOOKUP.save(deps.storage, (next_id, &hash_vec), &Empty {})?;
         attributes.push(Attribute::new("evented_id", next_id.to_string()));
     } else {
         // Only scheduled tasks get put into slots
@@ -364,10 +350,10 @@ fn execute_create_task(
                 TIME_SLOTS.save(deps.storage, (next_id, &hash_vec), &Empty {})?;
             }
         }
-        TASK_SLOT.save(deps.storage, &hash_vec, &next_id)?;
         attributes.push(Attribute::new("slot_id", next_id.to_string()));
         attributes.push(Attribute::new("slot_kind", slot_kind.to_string()));
     }
+    TASK_SLOT.save(deps.storage, &hash_vec, &next_id)?;
 
     // Save the current timestamp as the last time a task was created
     LAST_TASK_CREATION.save(deps.storage, &env.block.time)?;
@@ -453,8 +439,9 @@ fn query_slot_tasks_total(
             .collect::<StdResult<Vec<Vec<u8>>>>()?
             .len() as u64;
         let evented_tasks = EVENTED_TASKS_LOOKUP
-            .may_load(deps.storage, env.block.height + off)?
-            .unwrap_or_default()
+            .prefix(env.block.height + off)
+            .keys(deps.storage, None, None, Order::Ascending)
+            .collect::<StdResult<Vec<Vec<u8>>>>()?
             .len() as u64;
 
         let current_block_ts = env.block.time.nanos();
@@ -481,18 +468,16 @@ fn query_slot_tasks_total(
             .collect::<StdResult<_>>()?;
 
         let block_tasks = block_slots.len() as u64;
-        let evented_task_list: Vec<(u64, Vec<Vec<u8>>)> = EVENTED_TASKS_LOOKUP
-            .range(
+        let evented_task_list: Vec<((u64, Vec<u8>), Empty)> = EVENTED_TASKS_LOOKUP
+            .prefix_range(
                 deps.storage,
                 None,
-                Some(Bound::inclusive(env.block.height)),
+                Some(PrefixBound::inclusive(env.block.height)),
                 Order::Ascending,
             )
             .collect::<StdResult<_>>()?;
 
-        let evented_tasks = evented_task_list
-            .iter()
-            .fold(0, |acc, (_, hashes)| acc + hashes.len()) as u64;
+        let evented_tasks = evented_task_list.len() as u64;
 
         let time_slot: Vec<((u64, Vec<u8>), Empty)> = TIME_SLOTS
             .prefix_range(
@@ -581,48 +566,42 @@ fn query_evented_tasks(
     let limit = limit.unwrap_or(100);
     let tm = tasks_map();
 
-    let mut evented_hashes: Vec<Vec<u8>> = Vec::new();
     let mut all_tasks: Vec<TaskInfo> = Vec::new();
 
     // Check if start was supplied, otherwise get the next ids for block and time
-    if let Some(i) = start {
-        evented_hashes = EVENTED_TASKS_LOOKUP
-            .may_load(deps.storage, i)?
-            .unwrap_or_default();
+    let evented_hashes: Vec<Vec<u8>> = if let Some(i) = start {
+        EVENTED_TASKS_LOOKUP
+            .prefix(i)
+            .range(deps.storage, None, None, Order::Ascending)
+            .map(|res| res.map(|v| v.0))
+            .collect::<StdResult<_>>()?
     } else {
-        let block_evented: Vec<(u64, _)> = EVENTED_TASKS_LOOKUP
-            .range(
+        let block_evented_iter = EVENTED_TASKS_LOOKUP
+            .prefix_range(
                 deps.storage,
-                Some(Bound::inclusive(env.block.height)),
+                // TODO: should this boundary be min or max
+                Some(PrefixBound::inclusive(env.block.height)),
                 None,
                 Order::Ascending,
             )
             .skip(from_index as usize)
             .take(limit as usize)
-            .collect::<StdResult<Vec<(u64, _)>>>()?;
+            .map(|res| res.map(|v| v.0 .1));
 
-        if !block_evented.is_empty() {
-            for item in block_evented {
-                evented_hashes = [evented_hashes, item.1].concat();
-            }
-        }
-
-        let time_evented: Vec<(u64, _)> = EVENTED_TASKS_LOOKUP
-            .range(
+        let time_evented_iter = EVENTED_TASKS_LOOKUP
+            .prefix_range(
                 deps.storage,
-                Some(Bound::inclusive(env.block.time.nanos())),
+                Some(PrefixBound::inclusive(env.block.time.nanos())),
                 None,
                 Order::Ascending,
             )
             .take(1)
-            .collect::<StdResult<Vec<(u64, _)>>>()?;
+            .map(|res| res.map(|v| v.0 .1));
 
-        if !time_evented.is_empty() {
-            for item in time_evented {
-                evented_hashes = [evented_hashes, item.1].concat();
-            }
-        }
-    }
+        block_evented_iter
+            .chain(time_evented_iter)
+            .collect::<StdResult<_>>()?
+    };
 
     // Loop and get all associated tasks by hash
     for t in evented_hashes {
@@ -643,9 +622,11 @@ fn query_evented_ids(
     let limit = limit.unwrap_or(100);
 
     let evented_ids = EVENTED_TASKS_LOOKUP
-        .keys(deps.storage, None, None, Order::Ascending)
+        .range(deps.storage, None, None, Order::Ascending)
         .skip(from_index as usize)
         .take(limit as usize)
+        // TODO?: if we really need this method, better to use MultiIndex here
+        .map(|res| res.map(|v| v.0 .0))
         .collect::<StdResult<_>>()?;
 
     Ok(evented_ids)
@@ -657,28 +638,24 @@ fn query_evented_hashes(
     from_index: Option<u64>,
     limit: Option<u64>,
 ) -> StdResult<Vec<String>> {
-    let mut evented_hashes: Vec<Vec<u8>> = Vec::new();
     let from_index = from_index.unwrap_or_default();
     let limit = limit.unwrap_or(100);
 
     // Check if slot was supplied, otherwise get the next slots for block and time
-    if let Some(i) = id {
-        evented_hashes = EVENTED_TASKS_LOOKUP
-            .may_load(deps.storage, i)?
-            .unwrap_or_default();
+    let evented_hashes: Vec<Vec<u8>> = if let Some(i) = id {
+        EVENTED_TASKS_LOOKUP
+            .prefix(i)
+            .range(deps.storage, None, None, Order::Ascending)
+            .map(|res| res.map(|v| v.0))
+            .collect::<StdResult<_>>()?
     } else {
-        let evented: Vec<(u64, _)> = EVENTED_TASKS_LOOKUP
+        EVENTED_TASKS_LOOKUP
             .range(deps.storage, None, None, Order::Ascending)
             .skip(from_index as usize)
             .take(limit as usize)
-            .collect::<StdResult<Vec<(u64, _)>>>()?;
-
-        if !evented.is_empty() {
-            for item in evented {
-                evented_hashes = [evented_hashes, item.1].concat();
-            }
-        }
-    }
+            .map(|res| res.map(|v| v.0 .1))
+            .collect::<StdResult<_>>()?
+    };
 
     // Generate strings for all hashes
     let evented_task_hashes: Vec<_> = evented_hashes
@@ -738,25 +715,17 @@ fn query_slot_hashes(deps: Deps, slot: Option<u64>) -> StdResult<SlotHashesRespo
     // Check if slot was supplied, otherwise get the next slots for block and time
     if let Some(id) = slot {
         block_hashes = BLOCK_SLOTS
-            .prefix_range(
-                deps.storage,
-                Some(PrefixBound::inclusive(id)),
-                Some(PrefixBound::inclusive(id)),
-                Order::Ascending,
-            )
-            .map(|res| res.map(|item| item.0 .1))
+            .prefix(id)
+            .range(deps.storage, None, None, Order::Ascending)
+            .map(|res| res.map(|item| item.0))
             .collect::<StdResult<Vec<_>>>()?;
         if !block_hashes.is_empty() {
             block_id = id;
         }
         time_hashes = TIME_SLOTS
-            .prefix_range(
-                deps.storage,
-                Some(PrefixBound::inclusive(id)),
-                Some(PrefixBound::inclusive(id)),
-                Order::Ascending,
-            )
-            .map(|res| res.map(|item| item.0 .1))
+            .prefix(id)
+            .range(deps.storage, None, None, Order::Ascending)
+            .map(|res| res.map(|item| item.0))
             .collect::<StdResult<Vec<_>>>()?;
         if !time_hashes.is_empty() {
             time_id = id;
@@ -771,13 +740,9 @@ fn query_slot_hashes(deps: Deps, slot: Option<u64>) -> StdResult<SlotHashesRespo
         if !time_ids.is_empty() {
             time_id = time_ids[0];
             time_hashes = TIME_SLOTS
-                .prefix_range(
-                    deps.storage,
-                    Some(PrefixBound::inclusive(time_id)),
-                    Some(PrefixBound::inclusive(time_id)),
-                    Order::Ascending,
-                )
-                .map(|res| res.map(|item| item.0 .1))
+                .prefix(time_id)
+                .range(deps.storage, None, None, Order::Ascending)
+                .map(|res| res.map(|item| item.0))
                 .collect::<StdResult<Vec<_>>>()?;
         }
 
@@ -790,13 +755,9 @@ fn query_slot_hashes(deps: Deps, slot: Option<u64>) -> StdResult<SlotHashesRespo
         if !block_ids.is_empty() {
             block_id = block_ids[0];
             block_hashes = BLOCK_SLOTS
-                .prefix_range(
-                    deps.storage,
-                    Some(PrefixBound::inclusive(block_id)),
-                    Some(PrefixBound::inclusive(block_id)),
-                    Order::Ascending,
-                )
-                .map(|res| res.map(|item| item.0 .1))
+                .prefix(block_id)
+                .range(deps.storage, None, None, Order::Ascending)
+                .map(|res| res.map(|item| item.0))
                 .collect::<StdResult<Vec<_>>>()?;
         }
     }

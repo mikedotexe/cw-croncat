@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    Addr, BankMsg, Binary, BlockInfo, CosmosMsg, Deps, Empty, Order, QuerierWrapper, StdResult,
-    Storage, WasmMsg,
+    Addr, BankMsg, Binary, BlockInfo, CosmosMsg, Deps, Empty, QuerierWrapper, StdResult, Storage,
+    WasmMsg,
 };
 use croncat_sdk_tasks::types::{
     AmountForOneTask, Boundary, BoundaryHeight, BoundaryTime, Config, Interval, TaskRequest,
@@ -195,34 +195,16 @@ pub(crate) fn remove_task(
 ) -> StdResult<()> {
     tasks_map().remove(storage, hash)?;
     TASKS_TOTAL.update(storage, |total| StdResult::Ok(total - 1))?;
+    let slot_id = TASK_SLOT.load(storage, hash)?;
+
     if is_evented {
-        let hashes = EVENTED_TASKS_LOOKUP
-            .range(storage, None, None, Order::Ascending)
-            .collect::<StdResult<Vec<_>>>()?;
-        for (hid, mut all_hashes) in hashes {
-            let mut found = false;
-            all_hashes.retain(|h| {
-                found = h == hash;
-                !found
-            });
-            if found {
-                if all_hashes.is_empty() {
-                    EVENTED_TASKS_LOOKUP.remove(storage, hid);
-                } else {
-                    EVENTED_TASKS_LOOKUP.save(storage, hid, &all_hashes)?;
-                }
-                break;
-            }
-        }
+        EVENTED_TASKS_LOOKUP.remove(storage, (slot_id, hash));
     } else if is_block {
-        let slot_id = TASK_SLOT.load(storage, hash)?;
         BLOCK_SLOTS.remove(storage, (slot_id, hash));
-        TASK_SLOT.remove(storage, hash);
     } else {
-        let slot_id = TASK_SLOT.load(storage, hash)?;
         TIME_SLOTS.remove(storage, (slot_id, hash));
-        TASK_SLOT.remove(storage, hash);
     }
+    TASK_SLOT.remove(storage, hash);
 
     Ok(())
 }
