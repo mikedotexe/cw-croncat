@@ -575,7 +575,6 @@ fn query_evented_tasks(
         let block_evented_iter = EVENTED_TASKS_LOOKUP
             .prefix_range(
                 deps.storage,
-                // TODO: should this boundary be min or max
                 Some(PrefixBound::inclusive(env.block.height)),
                 None,
                 Order::Ascending,
