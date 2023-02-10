@@ -173,14 +173,13 @@ fn execute_reschedule_task(
                 SlotType::Block => {
                     BLOCK_SLOTS.remove(deps.storage, (slot_id, &task_hash));
                     BLOCK_SLOTS.save(deps.storage, (next_id, &task_hash), &Empty {})?;
-                    TASK_SLOT.save(deps.storage, &task_hash, &next_id)?;
                 }
                 SlotType::Cron => {
                     TIME_SLOTS.remove(deps.storage, (slot_id, &task_hash));
                     TIME_SLOTS.save(deps.storage, (next_id, &task_hash), &Empty {})?;
-                    TASK_SLOT.save(deps.storage, &task_hash, &next_id)?;
                 }
             }
+            TASK_SLOT.save(deps.storage, &task_hash, &next_id)?;
         } else if !task.is_evented() {
             remove_task(
                 deps.storage,
