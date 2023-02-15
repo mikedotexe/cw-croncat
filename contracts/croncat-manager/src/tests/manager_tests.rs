@@ -4893,6 +4893,49 @@ fn not_allowing_to_execute_any_task() {
     let res = app
         .execute_contract(
             Addr::unchecked(PARTICIPANT0),
+            tasks_addr.clone(),
+            &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
+                task: Box::new(task),
+            },
+            &coins(600_000, DENOM),
+        )
+        .unwrap();
+    let task_hash = String::from_vec(res.data.unwrap().0).unwrap();
+
+    let res: ContractError = app
+        .execute_contract(
+            Addr::unchecked(AGENT0),
+            manager_addr.clone(),
+            &ExecuteMsg::ProxyCall {
+                task_hash: Some(task_hash),
+            },
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(res, ContractError::NoTask {});
+
+    // not evented task, without queries
+    let task = croncat_sdk_tasks::types::TaskRequest {
+        interval: Interval::Immediate,
+        boundary: None,
+        stop_on_fail: false,
+        actions: vec![Action {
+            msg: BankMsg::Send {
+                to_address: "alice".to_owned(),
+                amount: coins(123, DENOM),
+            }
+            .into(),
+            gas_limit: None,
+        }],
+        queries: None,
+        transforms: None,
+        cw20: None,
+    };
+    let res = app
+        .execute_contract(
+            Addr::unchecked(PARTICIPANT0),
             tasks_addr,
             &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
                 task: Box::new(task),
