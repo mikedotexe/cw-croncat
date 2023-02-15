@@ -246,18 +246,15 @@ fn execute_proxy_call(
             Some(vec![Attribute::new("lifecycle", "task_ended")]),
         );
     }
-
+    let event_based = task.queries.iter().flatten().any(|q| q.check_result);
+    if event_based && !(task.interval == Interval::Once || task.interval == Interval::Immediate) {
+        return Err(ContractError::TaskNoLongerValid {});
+    }
+    // Don't allow to execute any task available
+    else if !event_based && pre_event_based {
+        return Err(ContractError::NoTask {});
+    }
     if let Some(queries) = task.queries.as_ref() {
-        let event_based = queries.iter().any(|q| q.check_result);
-        if event_based && !(task.interval == Interval::Once || task.interval == Interval::Immediate)
-        {
-            return Err(ContractError::TaskNoLongerValid {});
-        }
-        // Don't allow to execute any task available
-        else if !event_based && pre_event_based {
-            return Err(ContractError::NoTask {});
-        }
-
         // Process all the queries
         let mut query_responses = Vec::with_capacity(queries.len());
         for query in queries {
