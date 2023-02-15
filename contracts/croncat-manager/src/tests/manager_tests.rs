@@ -4697,3 +4697,222 @@ fn immediate_event_task_has_multiple_executions() {
     )
     .expect("Second proxy call should succeed");
 }
+
+#[test]
+fn failed_query_or_transform() {
+    let mut app = default_app();
+    let factory_addr = init_factory(&mut app);
+
+    // let instantiate_msg: InstantiateMsg = default_instantiate_msg();
+    let instantiate_msg: InstantiateMsg = default_instantiate_message();
+    let tasks_addr = init_tasks(&mut app, &factory_addr);
+    let manager_addr = init_manager(&mut app, &instantiate_msg, &factory_addr, &[]);
+    let agents_addr = init_agents(&mut app, &factory_addr);
+    let mod_balances = init_mod_balances(&mut app, &factory_addr);
+
+    activate_agent(&mut app, &agents_addr);
+
+    // no reschedule
+    let task = croncat_sdk_tasks::types::TaskRequest {
+        interval: Interval::Immediate,
+        boundary: None,
+        // stop on fail here
+        stop_on_fail: true,
+        actions: vec![Action {
+            msg: BankMsg::Send {
+                to_address: "alice".to_owned(),
+                amount: coins(123, DENOM),
+            }
+            .into(),
+            gas_limit: None,
+        }],
+        queries: Some(vec![CroncatQuery {
+            contract_addr: mod_balances.to_string(),
+            msg: to_binary(&croncat_mod_balances::msg::QueryMsg::HasBalanceComparator(
+                croncat_mod_balances::types::HasBalanceComparator {
+                    address: "lucy".to_owned(),
+                    required_balance: Cw20CoinVerified {
+                        address: Addr::unchecked("fakecw20"),
+                        amount: Uint128::new(420),
+                    }
+                    .into(),
+                    comparator: croncat_mod_balances::types::BalanceComparator::Eq,
+                },
+            ))
+            .unwrap(),
+            check_result: true,
+        }]),
+        transforms: None,
+        cw20: None,
+    };
+    let res = app
+        .execute_contract(
+            Addr::unchecked(PARTICIPANT0),
+            tasks_addr.clone(),
+            &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
+                task: Box::new(task),
+            },
+            &coins(600_000, DENOM),
+        )
+        .unwrap();
+    let task_hash = String::from_vec(res.data.unwrap().0).unwrap();
+
+    let res = app
+        .execute_contract(
+            Addr::unchecked(AGENT0),
+            manager_addr.clone(),
+            &ExecuteMsg::ProxyCall {
+                task_hash: Some(task_hash),
+            },
+            &[],
+        )
+        .unwrap();
+    assert!(res.events.iter().any(|ev| ev
+        .attributes
+        .iter()
+        .any(|attr| attr.key == "lifecycle" && attr.value == "queries_or_transforms_failed")));
+    assert!(res.events.iter().any(|ev| ev
+        .attributes
+        .iter()
+        .any(|attr| attr.key == "action" && attr.value == "remove_task")));
+    assert!(res.events.iter().any(|ev| ev
+        .attributes
+        .iter()
+        .any(|attr| attr.key == "action" && attr.value == "remove_task_by_manager")));
+
+    // reschedule
+    let task = croncat_sdk_tasks::types::TaskRequest {
+        interval: Interval::Immediate,
+        boundary: None,
+        stop_on_fail: false,
+        actions: vec![Action {
+            msg: BankMsg::Send {
+                to_address: "alice".to_owned(),
+                amount: coins(123, DENOM),
+            }
+            .into(),
+            gas_limit: None,
+        }],
+        queries: Some(vec![CroncatQuery {
+            contract_addr: mod_balances.to_string(),
+            msg: to_binary(&croncat_mod_balances::msg::QueryMsg::HasBalanceComparator(
+                croncat_mod_balances::types::HasBalanceComparator {
+                    address: ADMIN.to_owned(),
+                    required_balance: coins(10, DENOM).into(),
+                    comparator: croncat_mod_balances::types::BalanceComparator::Eq,
+                },
+            ))
+            .unwrap(),
+            check_result: false,
+        }]),
+        transforms: Some(vec![Transform {
+            action_idx: 0,
+            query_idx: 0,
+            action_path: vec!["a".to_owned().into()].into(),
+            query_response_path: vec![].into(),
+        }]),
+        cw20: None,
+    };
+    app.execute_contract(
+        Addr::unchecked(PARTICIPANT0),
+        tasks_addr,
+        &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
+            task: Box::new(task),
+        },
+        &coins(600_000, DENOM),
+    )
+    .unwrap();
+
+    app.update_block(add_little_time);
+
+    let res = app
+        .execute_contract(
+            Addr::unchecked(AGENT0),
+            manager_addr,
+            &ExecuteMsg::ProxyCall { task_hash: None },
+            &[],
+        )
+        .unwrap();
+
+    assert!(res.events.iter().any(|ev| ev
+        .attributes
+        .iter()
+        .any(|attr| attr.key == "lifecycle" && attr.value == "queries_or_transforms_failed")));
+    assert!(res.events.iter().any(|ev| ev
+        .attributes
+        .iter()
+        .any(|attr| attr.key == "action" && attr.value == "reschedule_task")));
+}
+
+#[test]
+fn not_allowing_to_execute_any_task() {
+    let mut app = default_app();
+    let factory_addr = init_factory(&mut app);
+
+    // let instantiate_msg: InstantiateMsg = default_instantiate_msg();
+    let instantiate_msg: InstantiateMsg = default_instantiate_message();
+    let tasks_addr = init_tasks(&mut app, &factory_addr);
+    let manager_addr = init_manager(&mut app, &instantiate_msg, &factory_addr, &[]);
+    let agents_addr = init_agents(&mut app, &factory_addr);
+    let mod_balances = init_mod_balances(&mut app, &factory_addr);
+
+    activate_agent(&mut app, &agents_addr);
+    // not evented task, try to execute by hash
+    let task = croncat_sdk_tasks::types::TaskRequest {
+        interval: Interval::Immediate,
+        boundary: None,
+        stop_on_fail: false,
+        actions: vec![Action {
+            msg: BankMsg::Send {
+                to_address: "alice".to_owned(),
+                amount: coins(123, DENOM),
+            }
+            .into(),
+            gas_limit: None,
+        }],
+        queries: Some(vec![CroncatQuery {
+            contract_addr: mod_balances.to_string(),
+            msg: to_binary(&croncat_mod_balances::msg::QueryMsg::HasBalanceComparator(
+                croncat_mod_balances::types::HasBalanceComparator {
+                    address: ADMIN.to_owned(),
+                    required_balance: coins(10, DENOM).into(),
+                    comparator: croncat_mod_balances::types::BalanceComparator::Eq,
+                },
+            ))
+            .unwrap(),
+            check_result: false,
+        }]),
+        transforms: Some(vec![Transform {
+            action_idx: 0,
+            query_idx: 0,
+            action_path: vec!["a".to_owned().into()].into(),
+            query_response_path: vec![].into(),
+        }]),
+        cw20: None,
+    };
+    let res = app
+        .execute_contract(
+            Addr::unchecked(PARTICIPANT0),
+            tasks_addr,
+            &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
+                task: Box::new(task),
+            },
+            &coins(600_000, DENOM),
+        )
+        .unwrap();
+    let task_hash = String::from_vec(res.data.unwrap().0).unwrap();
+
+    let res: ContractError = app
+        .execute_contract(
+            Addr::unchecked(AGENT0),
+            manager_addr,
+            &ExecuteMsg::ProxyCall {
+                task_hash: Some(task_hash),
+            },
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(res, ContractError::NoTask {});
+}

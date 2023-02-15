@@ -6,7 +6,7 @@ use cosmwasm_std::{
 use croncat_sdk_agents::msg::AgentResponse;
 use croncat_sdk_core::{internal_messages::agents::AgentOnTaskCompleted, types::AmountForOneTask};
 use croncat_sdk_manager::types::{Config, TaskBalance};
-use croncat_sdk_tasks::types::{Boundary, TaskInfo};
+use croncat_sdk_tasks::types::{Boundary, Interval, TaskInfo};
 use cw20::{Cw20CoinVerified, Cw20ExecuteMsg};
 
 use crate::{
@@ -459,7 +459,7 @@ pub(crate) fn is_after_boundary(block_info: &BlockInfo, boundary: Option<&Bounda
 pub fn replace_values(
     task: &mut TaskInfo,
     construct_res_data: Vec<cosmwasm_std::Binary>,
-) -> Result<(), ContractError> {
+) -> StdResult<()> {
     for transform in task.transforms.iter() {
         let wasm_msg = task
             .actions
@@ -476,13 +476,13 @@ pub fn replace_values(
                     None
                 }
             })
-            .ok_or(ContractError::TaskNotReady {})?;
+            .ok_or_else(|| StdError::not_found(format!("action[{}]", transform.action_idx)))?;
         let mut action_value = cosmwasm_std::from_binary(wasm_msg)?;
 
         let mut q_val = {
             let bin = construct_res_data
                 .get(transform.query_idx as usize)
-                .ok_or(ContractError::TaskNotReady {})?;
+                .ok_or_else(|| StdError::not_found(format!("query[{}]", transform.query_idx)))?;
             cosmwasm_std::from_binary(bin)?
         };
         let replace_value = transform.query_response_path.find_value(&mut q_val)?;
@@ -585,7 +585,7 @@ pub(crate) fn check_if_sender_is_task_owner(
 }
 
 pub fn create_task_completed_msg(
-    querier: &QuerierWrapper<Empty>,
+    querier: &QuerierWrapper,
     config: &Config,
     agent_id: &Addr,
     is_block_slot_task: bool,
@@ -602,4 +602,70 @@ pub fn create_task_completed_msg(
     });
 
     Ok(execute)
+}
+
+pub fn queries_transforms_fallback(
+    deps: DepsMut,
+    config: Config,
+    task: TaskInfo,
+    agent_addr: Addr,
+    tasks_addr: Addr,
+    error: StdError,
+) -> Result<Response, ContractError> {
+    let gas_with_fees = gas_with_fees(
+        task.amount_for_one_task.gas,
+        config.agent_fee + config.treasury_fee,
+    )?;
+    let native_for_gas_required = config.gas_price.calculate(gas_with_fees)?;
+    let mut task_balance = TASKS_BALANCES.load(deps.storage, task.task_hash.as_bytes())?;
+    task_balance.native_balance = task_balance
+        .native_balance
+        .checked_sub(Uint128::new(native_for_gas_required))
+        .map_err(StdError::overflow)?;
+
+    // Account for fees, to reimburse agent for efforts
+    add_fee_rewards(
+        deps.storage,
+        task.amount_for_one_task.gas,
+        &config.gas_price,
+        &agent_addr,
+        config.agent_fee,
+        config.treasury_fee,
+    )?;
+
+    if task.stop_on_fail || task.interval == Interval::Once {
+        // refund the final balances to task owner
+        let coins_transfer = remove_task_balance(
+            deps.storage,
+            task_balance,
+            &task.owner_addr,
+            &config.native_denom,
+            task.task_hash.as_bytes(),
+        )?;
+        let msg = croncat_sdk_core::internal_messages::tasks::TasksRemoveTaskByManager {
+            task_hash: task.task_hash.into_bytes(),
+        }
+        .into_cosmos_msg(tasks_addr)?;
+        let bank_send = BankMsg::Send {
+            to_address: task.owner_addr.into_string(),
+            amount: coins_transfer,
+        };
+        Ok(Response::new()
+            .add_attribute("action", "remove_task")
+            .add_attribute("lifecycle", "queries_or_transforms_failed")
+            .add_attribute("err", error.to_string())
+            .add_message(msg)
+            .add_message(bank_send))
+    } else {
+        let msg = croncat_sdk_core::internal_messages::tasks::TasksRescheduleTask {
+            task_hash: task.task_hash.into_bytes(),
+        }
+        .into_cosmos_msg(tasks_addr)?;
+
+        Ok(Response::new()
+            .add_attribute("action", "reschedule_task")
+            .add_attribute("lifecycle", "queries_or_transforms_failed")
+            .add_attribute("err", error.to_string())
+            .add_message(msg))
+    }
 }

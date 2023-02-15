@@ -22,8 +22,8 @@ use crate::helpers::{
     assert_caller_is_agent_contract, attached_natives, calculate_required_natives,
     check_if_sender_is_tasks, check_ready_for_execution, create_bank_send_message,
     create_task_completed_msg, finalize_task, gas_with_fees, get_agents_addr, get_tasks_addr,
-    is_after_boundary, is_before_boundary, parse_reply_msg, query_agent, recalculate_cw20,
-    remove_task_balance, replace_values, task_sub_msgs,
+    is_after_boundary, is_before_boundary, parse_reply_msg, queries_transforms_fallback,
+    query_agent, recalculate_cw20, remove_task_balance, replace_values, task_sub_msgs,
 };
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{
@@ -182,7 +182,7 @@ fn execute_proxy_call(
     let agent_addr = info.sender;
     let agents_addr = get_agents_addr(&deps.querier, &config)?;
     let tasks_addr = get_tasks_addr(&deps.querier, &config)?;
-
+    let pre_event_based = task_hash.is_some();
     // Check if agent is active,
     // Then get a task
     let current_task: croncat_sdk_tasks::types::TaskResponse = if let Some(hash) = task_hash {
@@ -253,23 +253,38 @@ fn execute_proxy_call(
         {
             return Err(ContractError::TaskNoLongerValid {});
         }
+        // Don't allow to execute any task available
+        else if !event_based && pre_event_based {
+            return Err(ContractError::NoTask {});
+        }
 
         // Process all the queries
-        let mut query_responses = Vec::with_capacity(task.queries.as_ref().unwrap().len());
-        for query in task.queries.iter().flatten() {
-            let query_res: mod_sdk::types::QueryResponse = deps.querier.query(
+        let mut query_responses = Vec::with_capacity(queries.len());
+        for query in queries {
+            let query_result: StdResult<mod_sdk::types::QueryResponse> = deps.querier.query(
                 &WasmQuery::Smart {
                     contract_addr: query.contract_addr.clone(),
                     msg: query.msg.clone(),
                 }
                 .into(),
-            )?;
-            if query.check_result && !query_res.result {
-                return Err(ContractError::TaskQueryResultFalse {});
+            );
+            match query_result {
+                Ok(query_res) => {
+                    if query.check_result && !query_res.result {
+                        return Err(ContractError::TaskQueryResultFalse {});
+                    }
+                    query_responses.push(query_res.data);
+                }
+                Err(err) => {
+                    return queries_transforms_fallback(
+                        deps, config, task, agent_addr, tasks_addr, err,
+                    );
+                }
             }
-            query_responses.push(query_res.data);
         }
-        replace_values(&mut task, query_responses)?;
+        if let Err(err) = replace_values(&mut task, query_responses) {
+            return queries_transforms_fallback(deps, config, task, agent_addr, tasks_addr, err);
+        }
 
         // Recalculate cw20 usage and re-check for self-calls
         let invalidated_after_transform = if let Ok(amounts) =
