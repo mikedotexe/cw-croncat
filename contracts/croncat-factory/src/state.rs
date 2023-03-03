@@ -29,3 +29,5 @@ pub struct TempReply {
 
 // Temporary storing data for the reply
 pub const TEMP_REPLY: Item<TempReply> = Item::new("temp_reply");
+
+pub const MAX_URL_LENGTH: u16 = 1_000;

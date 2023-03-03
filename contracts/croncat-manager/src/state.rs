@@ -7,6 +7,10 @@ pub use croncat_sdk_manager::types::Config;
 
 pub const CONFIG: Item<Config> = Item::new("config");
 
+/// Controls whether or not the contract is paused. Can only be changed to TRUE by
+/// the pause_admin, can only be unpaused by DAO/owner_addr
+pub const PAUSED: Item<bool> = Item::new("paused");
+
 // Accrued Treasury reward balance in native coin
 pub const TREASURY_BALANCE: Item<Uint128> = Item::new("treasury_balance");
 

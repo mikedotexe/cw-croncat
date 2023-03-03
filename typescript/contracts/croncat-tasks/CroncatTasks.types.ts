@@ -4,6 +4,7 @@
 * and run the @cosmwasm/ts-codegen generate command to regenerate this file.
 */
 
+export type Addr = string;
 export interface InstantiateMsg {
   chain_name: string;
   croncat_agents_key: [string, [number, number]];
@@ -12,7 +13,7 @@ export interface InstantiateMsg {
   gas_base_fee?: number | null;
   gas_limit?: number | null;
   gas_query_fee?: number | null;
-  owner_addr?: string | null;
+  pause_admin: Addr;
   slot_granularity_time?: number | null;
   version?: string | null;
 }
@@ -30,6 +31,10 @@ export type ExecuteMsg = {
   remove_task_by_manager: TasksRemoveTaskByManager;
 } | {
   reschedule_task: TasksRescheduleTask;
+} | {
+  pause_contract: {};
+} | {
+  unpause_contract: {};
 };
 export type CosmosMsgForEmpty = {
   bank: BankMsg;
@@ -187,8 +192,6 @@ export interface UpdateConfigMsg {
   gas_base_fee?: number | null;
   gas_limit?: number | null;
   gas_query_fee?: number | null;
-  owner_addr?: string | null;
-  paused?: boolean | null;
   slot_granularity_time?: number | null;
 }
 export interface TaskRequest {
@@ -254,6 +257,8 @@ export interface TasksRescheduleTask {
 export type QueryMsg = {
   config: {};
 } | {
+  paused: {};
+} | {
   tasks_total: {};
 } | {
   current_task_info: {};
@@ -309,7 +314,6 @@ export type QueryMsg = {
     offset?: number | null;
   };
 };
-export type Addr = string;
 export interface Task {
   actions: ActionForEmpty[];
   amount_for_one_task: AmountForOneTask;
@@ -322,13 +326,21 @@ export interface Task {
   version: string;
 }
 export interface AmountForOneTask {
+  agent_fee: number;
   coin: [Coin | null, Coin | null];
   cw20?: Cw20CoinVerified | null;
   gas: number;
+  gas_price: GasPrice;
+  treasury_fee: number;
 }
 export interface Cw20CoinVerified {
   address: Addr;
   amount: Uint128;
+}
+export interface GasPrice {
+  denominator: number;
+  gas_adjustment_numerator: number;
+  numerator: number;
 }
 export interface Config {
   chain_name: string;
@@ -340,7 +352,7 @@ export interface Config {
   gas_limit: number;
   gas_query_fee: number;
   owner_addr: Addr;
-  paused: boolean;
+  pause_admin: Addr;
   slot_granularity_time: number;
   version: string;
 }
@@ -366,6 +378,7 @@ export interface CurrentTaskInfoResponse {
 export type ArrayOfString = string[];
 export type ArrayOfUint64 = number[];
 export type ArrayOfTaskInfo = TaskInfo[];
+export type Boolean = boolean;
 export interface SlotHashesResponse {
   block_id: number;
   block_task_hash: string[];
@@ -382,4 +395,3 @@ export interface SlotTasksTotalResponse {
   evented_tasks: number;
 }
 export type String = string;
-export type ArrayOfTaskResponse = TaskResponse[];

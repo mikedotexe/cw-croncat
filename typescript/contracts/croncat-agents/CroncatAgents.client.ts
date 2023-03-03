@@ -6,7 +6,7 @@
 
 import { CosmWasmClient, SigningCosmWasmClient, ExecuteResult } from "@cosmjs/cosmwasm-stargate";
 import { Coin, StdFee } from "@cosmjs/amino";
-import { InstantiateMsg, ExecuteMsg, Addr, AgentOnTaskCreated, AgentOnTaskCompleted, UpdateConfig, QueryMsg, Config, Uint128, Timestamp, Uint64, AgentStatus, AgentResponse, AgentInfo, GetAgentIdsResponse, AgentTaskResponse, TaskStats } from "./CroncatAgents.types";
+import { Addr, InstantiateMsg, ExecuteMsg, AgentOnTaskCreated, AgentOnTaskCompleted, UpdateConfig, QueryMsg, Config, Uint128, Timestamp, Uint64, AgentStatus, AgentResponse, AgentInfo, GetAgentIdsResponse, AgentTaskResponse, TaskStats, Boolean } from "./CroncatAgents.types";
 export interface CroncatAgentsReadOnlyInterface {
   contractAddress: string;
   getAgent: ({
@@ -27,6 +27,7 @@ export interface CroncatAgentsReadOnlyInterface {
     accountId: string;
   }) => Promise<AgentTaskResponse>;
   config: () => Promise<Config>;
+  paused: () => Promise<Boolean>;
 }
 export class CroncatAgentsQueryClient implements CroncatAgentsReadOnlyInterface {
   client: CosmWasmClient;
@@ -39,6 +40,7 @@ export class CroncatAgentsQueryClient implements CroncatAgentsReadOnlyInterface 
     this.getAgentIds = this.getAgentIds.bind(this);
     this.getAgentTasks = this.getAgentTasks.bind(this);
     this.config = this.config.bind(this);
+    this.paused = this.paused.bind(this);
   }
 
   getAgent = async ({
@@ -82,6 +84,11 @@ export class CroncatAgentsQueryClient implements CroncatAgentsReadOnlyInterface 
       config: {}
     });
   };
+  paused = async (): Promise<Boolean> => {
+    return this.client.queryContractSmart(this.contractAddress, {
+      paused: {}
+    });
+  };
 }
 export interface CroncatAgentsInterface extends CroncatAgentsReadOnlyInterface {
   contractAddress: string;
@@ -116,6 +123,8 @@ export interface CroncatAgentsInterface extends CroncatAgentsReadOnlyInterface {
     config: UpdateConfig;
   }, fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
   tick: (fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
+  pauseContract: (fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
+  unpauseContract: (fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
 }
 export class CroncatAgentsClient extends CroncatAgentsQueryClient implements CroncatAgentsInterface {
   client: SigningCosmWasmClient;
@@ -135,6 +144,8 @@ export class CroncatAgentsClient extends CroncatAgentsQueryClient implements Cro
     this.onTaskCompleted = this.onTaskCompleted.bind(this);
     this.updateConfig = this.updateConfig.bind(this);
     this.tick = this.tick.bind(this);
+    this.pauseContract = this.pauseContract.bind(this);
+    this.unpauseContract = this.unpauseContract.bind(this);
   }
 
   registerAgent = async ({
@@ -208,6 +219,16 @@ export class CroncatAgentsClient extends CroncatAgentsQueryClient implements Cro
   tick = async (fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
     return await this.client.execute(this.sender, this.contractAddress, {
       tick: {}
+    }, fee, memo, funds);
+  };
+  pauseContract = async (fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
+    return await this.client.execute(this.sender, this.contractAddress, {
+      pause_contract: {}
+    }, fee, memo, funds);
+  };
+  unpauseContract = async (fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
+    return await this.client.execute(this.sender, this.contractAddress, {
+      unpause_contract: {}
     }, fee, memo, funds);
   };
 }

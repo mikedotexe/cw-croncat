@@ -19,11 +19,19 @@ pub enum QueryMsg {
 
     // Query proposals and check if there are any passed proposals
     #[returns(mod_sdk::types::QueryResponse)]
-    HasPassedProposals { dao_address: String },
+    HasPassedProposals {
+        dao_address: String,
+        start_after: Option<u64>,
+        limit: Option<u64>,
+    },
 
     // Query proposals and check if there are any passed proposals with Wasm::Migration message
     #[returns(mod_sdk::types::QueryResponse)]
-    HasPassedProposalWithMigration { dao_address: String },
+    HasPassedProposalWithMigration {
+        dao_address: String,
+        start_after: Option<u64>,
+        limit: Option<u64>,
+    },
 
     // Check if the last proposal id is greater than specified value
     #[returns(mod_sdk::types::QueryResponse)]

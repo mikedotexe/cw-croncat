@@ -5,7 +5,6 @@ import { config } from "dotenv"
 import { getContractVersionFromCargoToml } from './utils'
 config({ path: '.env' })
 import { getGitHash, getChecksums } from './utils'
-const denom: string = process.env.DENOM
 
 export class ManagerClient {
 	client: SigningCosmWasmClient;
@@ -25,7 +24,6 @@ export class ManagerClient {
 		const version = await getContractVersionFromCargoToml('croncat-manager')
 
 		let base64ManagerInst = Buffer.from(JSON.stringify({
-			"denom": denom,
 			"version": `${version[0]}.${version[1]}`,
 			"owner_addr": sender,
 			"croncat_tasks_key": ["tasks", version || [0, 1]],

@@ -1,10 +1,19 @@
-use crate::tests::common::add_seconds_to_block;
+use crate::tests::{
+    common::add_seconds_to_block, helpers::increment_block_height, AGENT0, AGENT1, PARTICIPANT0,
+    PARTICIPANT1, PAUSE_ADMIN,
+};
 use cosmwasm_std::{
     coin, coins, to_binary, Addr, BankMsg, Binary, StakingMsg, StdError, Timestamp, Uint128,
     Uint64, WasmMsg,
 };
-use croncat_sdk_core::types::AmountForOneTask;
-use croncat_sdk_manager::types::{TaskBalance, TaskBalanceResponse};
+use croncat_sdk_core::types::{AmountForOneTask, GasPrice};
+use croncat_sdk_factory::msg::{
+    ContractMetadataResponse, FactoryExecuteMsg, ModuleInstantiateInfo, VersionKind,
+};
+use croncat_sdk_manager::{
+    msg::ManagerExecuteMsg,
+    types::{TaskBalance, TaskBalanceResponse},
+};
 use croncat_sdk_tasks::{
     msg::UpdateConfigMsg,
     types::{
@@ -20,7 +29,8 @@ use cw_storage_plus::KeyDeserialize;
 use super::{
     contracts,
     helpers::{
-        default_app, default_instantiate_msg, init_agents, init_factory, init_manager, init_tasks,
+        activate_agent, default_app, default_instantiate_msg, init_agents, init_factory,
+        init_manager, init_mod_balances, init_tasks,
     },
     ADMIN, DENOM,
 };
@@ -33,6 +43,8 @@ use crate::{
 };
 
 mod instantiate_tests {
+    use crate::tests::PAUSE_ADMIN;
+
     use super::*;
 
     #[test]
@@ -47,9 +59,9 @@ mod instantiate_tests {
             .query_wasm_smart(tasks_addr, &QueryMsg::Config {})
             .unwrap();
         let expected_config = Config {
-            paused: false,
             version: "0.1".to_owned(),
             owner_addr: factory_addr.clone(),
+            pause_admin: Addr::unchecked(PAUSE_ADMIN),
             croncat_factory_addr: factory_addr,
             chain_name: "atom".to_owned(),
             croncat_manager_key: ("manager".to_owned(), [0, 1]),
@@ -72,7 +84,7 @@ mod instantiate_tests {
         let instantiate_msg: InstantiateMsg = InstantiateMsg {
             chain_name: "cron".to_owned(),
             version: Some("0.1".to_owned()),
-            owner_addr: Some(ANYONE.to_owned()),
+            pause_admin: Addr::unchecked(PAUSE_ADMIN),
             croncat_manager_key: ("definitely_not_manager".to_owned(), [4, 2]),
             croncat_agents_key: ("definitely_not_agents".to_owned(), [42, 0]),
             slot_granularity_time: Some(10),
@@ -88,9 +100,9 @@ mod instantiate_tests {
             .unwrap();
 
         let expected_config = Config {
-            paused: false,
             version: "0.1".to_owned(),
-            owner_addr: Addr::unchecked(ANYONE),
+            owner_addr: factory_addr.clone(),
+            pause_admin: Addr::unchecked(PAUSE_ADMIN),
             croncat_factory_addr: factory_addr,
             chain_name: "cron".to_owned(),
             croncat_manager_key: ("definitely_not_manager".to_owned(), [4, 2]),
@@ -110,7 +122,7 @@ mod instantiate_tests {
         let code_id = app.store_code(contracts::croncat_tasks_contract());
 
         let instantiate_msg: InstantiateMsg = InstantiateMsg {
-            owner_addr: Some("InVA$LID_ADDR".to_owned()),
+            pause_admin: Addr::unchecked("InVA$LID_ADDR"),
             ..default_instantiate_msg()
         };
         let contract_err: ContractError = app
@@ -147,7 +159,7 @@ fn create_task_without_query() {
 
     let action1 = Action {
         msg: BankMsg::Send {
-            to_address: "Bob".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT1).to_string(),
             amount: coins(5, DENOM),
         }
         .into(),
@@ -156,7 +168,7 @@ fn create_task_without_query() {
 
     let action2 = Action {
         msg: BankMsg::Send {
-            to_address: "Alice".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT0).to_string(),
             amount: coins(10, DENOM),
         }
         .into(),
@@ -220,9 +232,16 @@ fn create_task_without_query() {
             }),
             stop_on_fail: false,
             amount_for_one_task: AmountForOneTask {
-                gas: GAS_BASE_FEE + action1.gas_limit.unwrap() + action2.gas_limit.unwrap(),
                 cw20: None,
                 coin: [Some(coin(15, DENOM)), None],
+                gas: GAS_BASE_FEE + action1.gas_limit.unwrap() + action2.gas_limit.unwrap(),
+                agent_fee: 5,
+                treasury_fee: 5,
+                gas_price: GasPrice {
+                    numerator: 4,
+                    denominator: 100,
+                    gas_adjustment_numerator: 150,
+                },
             },
             actions: vec![action1, action2],
             queries: None,
@@ -305,7 +324,7 @@ fn create_task_without_query() {
     .unwrap();
     let action = Action {
         msg: BankMsg::Send {
-            to_address: "Bob".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT1).to_string(),
             amount: vec![coin(10, DENOM), coin(5, "test_coins")],
         }
         .into(),
@@ -373,9 +392,16 @@ fn create_task_without_query() {
             }),
             stop_on_fail: false,
             amount_for_one_task: AmountForOneTask {
-                gas: GAS_BASE_FEE + action.gas_limit.unwrap(),
                 cw20: None,
                 coin: [Some(coin(10, DENOM)), Some(coin(5, "test_coins"))],
+                gas: GAS_BASE_FEE + action.gas_limit.unwrap(),
+                agent_fee: 5,
+                treasury_fee: 5,
+                gas_price: GasPrice {
+                    numerator: 4,
+                    denominator: 100,
+                    gas_adjustment_numerator: 150,
+                },
             },
             actions: vec![action],
             queries: None,
@@ -456,7 +482,7 @@ fn check_task_timestamp() {
 
     let action1 = Action {
         msg: BankMsg::Send {
-            to_address: "Bob".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT1).to_string(),
             amount: coins(5, DENOM),
         }
         .into(),
@@ -465,7 +491,7 @@ fn check_task_timestamp() {
 
     let action2 = Action {
         msg: BankMsg::Send {
-            to_address: "Alice".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT0).to_string(),
             amount: coins(10, DENOM),
         }
         .into(),
@@ -538,11 +564,20 @@ fn create_task_with_wasm() {
     let instantiate_msg: InstantiateMsg = default_instantiate_msg();
     let tasks_addr = init_tasks(&mut app, &instantiate_msg, &factory_addr);
     let manager_addr = init_manager(&mut app, &factory_addr);
-    let _ = init_agents(&mut app, &factory_addr);
+    let agents_addr = init_agents(&mut app, &factory_addr);
 
+    // let action = Action {
+    //     msg: WasmMsg::Execute {
+    //         contract_addr: agents_addr.to_string(),
+    //         msg: to_binary(&croncat_sdk_agents::msg::ExecuteMsg::Tick {}).unwrap(),
+    //         funds: vec![],
+    //     }
+    //     .into(),
+    //     gas_limit: Some(150_000),
+    // };
     let action = Action {
         msg: WasmMsg::Execute {
-            contract_addr: manager_addr.to_string(),
+            contract_addr: agents_addr.to_string(),
             msg: to_binary(&croncat_sdk_agents::msg::ExecuteMsg::Tick {}).unwrap(),
             funds: vec![],
         }
@@ -562,31 +597,52 @@ fn create_task_with_wasm() {
         transforms: None,
         cw20: None,
     };
-    let res = app
-        .execute_contract(
-            Addr::unchecked(ADMIN),
-            tasks_addr.clone(),
-            &ExecuteMsg::CreateTask {
-                task: Box::new(task),
+    app.execute_contract(
+        Addr::unchecked(ADMIN),
+        factory_addr.clone(),
+        &croncat_sdk_factory::msg::FactoryExecuteMsg::Proxy {
+            msg: WasmMsg::Execute {
+                contract_addr: tasks_addr.to_string(),
+                msg: to_binary(&ExecuteMsg::CreateTask {
+                    task: Box::new(task),
+                })
+                .unwrap(),
+                funds: coins(30000, DENOM),
             },
-            &coins(30000, DENOM),
-        )
-        .unwrap();
-    let task_hash = String::from_vec(res.data.unwrap().0).unwrap();
+        },
+        &coins(30000, DENOM),
+    )
+    .unwrap();
+    // let task_hash = String::from_vec(res.data.unwrap().0).unwrap();
 
     // check total tasks
     let total_tasks: Uint64 = app
         .wrap()
-        .query_wasm_smart(tasks_addr, &QueryMsg::TasksTotal {})
+        .query_wasm_smart(tasks_addr.clone(), &QueryMsg::TasksTotal {})
         .unwrap();
     assert_eq!(total_tasks, Uint64::new(1));
+
+    let owner_tasks: Vec<TaskInfo> = app
+        .wrap()
+        .query_wasm_smart(
+            tasks_addr,
+            &QueryMsg::TasksByOwner {
+                owner_addr: factory_addr.clone().to_string(),
+                from_index: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    let task_hash = &owner_tasks[0].task_hash;
 
     // check it created balance on the manager contract
     let manager_task_balance: TaskBalanceResponse = app
         .wrap()
         .query_wasm_smart(
             manager_addr,
-            &croncat_manager::msg::QueryMsg::TaskBalance { task_hash },
+            &croncat_manager::msg::QueryMsg::TaskBalance {
+                task_hash: task_hash.clone(),
+            },
         )
         .unwrap();
     assert_eq!(
@@ -611,7 +667,7 @@ fn create_tasks_with_queries_and_transforms() {
 
     let action = Action {
         msg: BankMsg::Send {
-            to_address: "Bob".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT1).to_string(),
             amount: coins(5, DENOM),
         }
         .into(),
@@ -691,9 +747,16 @@ fn create_tasks_with_queries_and_transforms() {
             }),
             stop_on_fail: false,
             amount_for_one_task: AmountForOneTask {
-                gas: GAS_BASE_FEE + action.gas_limit.unwrap() + GAS_QUERY_FEE * 2,
                 cw20: None,
                 coin: [Some(coin(5, DENOM)), None],
+                gas: GAS_BASE_FEE + action.gas_limit.unwrap() + GAS_QUERY_FEE * 2,
+                agent_fee: 5,
+                treasury_fee: 5,
+                gas_price: GasPrice {
+                    numerator: 4,
+                    denominator: 100,
+                    gas_adjustment_numerator: 150,
+                },
             },
             actions: vec![action],
             queries: Some(queries),
@@ -783,7 +846,7 @@ fn remove_tasks_fail() {
         stop_on_fail: false,
         actions: vec![Action {
             msg: BankMsg::Send {
-                to_address: "Bob".to_owned(),
+                to_address: Addr::unchecked(PARTICIPANT1).to_string(),
                 amount: coins(5, DENOM),
             }
             .into(),
@@ -828,7 +891,7 @@ fn remove_tasks_fail() {
         stop_on_fail: false,
         actions: vec![Action {
             msg: BankMsg::Send {
-                to_address: "Bob".to_owned(),
+                to_address: Addr::unchecked(PARTICIPANT1).to_string(),
                 amount: coins(5, DENOM),
             }
             .into(),
@@ -881,24 +944,14 @@ fn remove_tasks_fail() {
         .unwrap();
     assert_eq!(err, ContractError::Unauthorized {});
 
-    app.execute_contract(
-        Addr::unchecked(ADMIN),
+    // Pause admin should be able to pause
+    let res = app.execute_contract(
+        Addr::unchecked(PAUSE_ADMIN),
         tasks_addr.clone(),
-        &ExecuteMsg::UpdateConfig(UpdateConfigMsg {
-            paused: Some(true),
-            owner_addr: None,
-            croncat_factory_addr: None,
-            croncat_manager_key: None,
-            croncat_agents_key: None,
-            slot_granularity_time: None,
-            gas_base_fee: None,
-            gas_action_fee: None,
-            gas_query_fee: None,
-            gas_limit: None,
-        }),
+        &ExecuteMsg::PauseContract {},
         &[],
-    )
-    .unwrap();
+    );
+    assert!(res.is_ok());
 
     // With queries:
     let err: ContractError = app
@@ -913,7 +966,7 @@ fn remove_tasks_fail() {
         .unwrap_err()
         .downcast()
         .unwrap();
-    assert_eq!(err, ContractError::Paused {});
+    assert_eq!(err, ContractError::ContractPaused {});
 
     // Without queries
     let err: ContractError = app
@@ -928,7 +981,7 @@ fn remove_tasks_fail() {
         .unwrap_err()
         .downcast()
         .unwrap();
-    assert_eq!(err, ContractError::Paused {});
+    assert_eq!(err, ContractError::ContractPaused {});
 }
 
 #[test]
@@ -951,7 +1004,7 @@ fn remove_tasks_with_queries_success() {
         stop_on_fail: false,
         actions: vec![Action {
             msg: BankMsg::Send {
-                to_address: "Bob".to_owned(),
+                to_address: Addr::unchecked(PARTICIPANT1).to_string(),
                 amount: coins(5, DENOM),
             }
             .into(),
@@ -991,9 +1044,12 @@ fn remove_tasks_with_queries_success() {
         transforms: task.transforms.clone().unwrap(),
         version: "0.1".to_string(),
         amount_for_one_task: AmountForOneTask {
-            gas: 50_000,
             cw20: None,
             coin: [Some(coin(5, DENOM)), None],
+            gas: 50_000,
+            agent_fee: u16::default(),
+            treasury_fee: u16::default(),
+            gas_price: GasPrice::default(),
         },
     };
     assert!(task_raw.is_evented());
@@ -1016,9 +1072,12 @@ fn remove_tasks_with_queries_success() {
         transforms: task.transforms.clone().unwrap(),
         version: "0.1".to_string(),
         amount_for_one_task: AmountForOneTask {
-            gas: 50_000,
             cw20: None,
             coin: [Some(coin(5, DENOM)), None],
+            gas: 50_000,
+            agent_fee: u16::default(),
+            treasury_fee: u16::default(),
+            gas_price: GasPrice::default(),
         },
     };
     assert!(!task_raw_non_evented.is_evented());
@@ -1077,7 +1136,7 @@ fn remove_tasks_with_queries_success() {
         stop_on_fail: false,
         actions: vec![Action {
             msg: BankMsg::Send {
-                to_address: "Bob".to_owned(),
+                to_address: Addr::unchecked(PARTICIPANT1).to_string(),
                 amount: coins(5, DENOM),
             }
             .into(),
@@ -1113,7 +1172,7 @@ fn remove_tasks_with_queries_success() {
         stop_on_fail: false,
         actions: vec![Action {
             msg: BankMsg::Send {
-                to_address: "Bob".to_owned(),
+                to_address: Addr::unchecked(PARTICIPANT1).to_string(),
                 amount: coins(5, DENOM),
             }
             .into(),
@@ -1177,7 +1236,6 @@ fn remove_tasks_with_queries_success() {
             },
         )
         .unwrap();
-    // println!("------- evented_ids {:?}", evented_ids);
     assert_eq!(evented_ids.len(), 1);
     assert_eq!(evented_ids, [12355]);
 
@@ -1348,7 +1406,7 @@ fn remove_tasks_without_queries_success() {
         stop_on_fail: false,
         actions: vec![Action {
             msg: BankMsg::Send {
-                to_address: "Bob".to_owned(),
+                to_address: Addr::unchecked(PARTICIPANT1).to_string(),
                 amount: coins(5, DENOM),
             }
             .into(),
@@ -1398,7 +1456,7 @@ fn remove_tasks_without_queries_success() {
         stop_on_fail: false,
         actions: vec![Action {
             msg: BankMsg::Send {
-                to_address: "Bob".to_owned(),
+                to_address: Addr::unchecked(PARTICIPANT1).to_string(),
                 amount: coins(5, DENOM),
             }
             .into(),
@@ -1537,52 +1595,56 @@ fn update_cfg() {
     let instantiate_msg: InstantiateMsg = default_instantiate_msg();
     let tasks_addr = init_tasks(&mut app, &instantiate_msg, &factory_addr);
 
-    app.execute_contract(
-        Addr::unchecked(ADMIN),
-        tasks_addr.clone(),
-        &ExecuteMsg::UpdateConfig(UpdateConfigMsg {
-            paused: Some(true),
-            owner_addr: Some(ANYONE.to_owned()),
+    // Call Factory contract's Proxy method, telling it to update Tasks Config and pause the contract
+    let msg = WasmMsg::Execute {
+        contract_addr: tasks_addr.to_string(),
+        msg: to_binary(&ExecuteMsg::UpdateConfig(UpdateConfigMsg {
             croncat_factory_addr: Some("fixed_croncat_factory_addr".to_owned()),
-            croncat_manager_key: Some(("manager2".to_owned(), [2, 2])),
-            croncat_agents_key: Some(("agents2".to_owned(), [2, 2])),
+            croncat_manager_key: Some(("new_manager2".to_owned(), [2, 2])),
+            croncat_agents_key: Some(("new_agents2".to_owned(), [2, 2])),
             slot_granularity_time: Some(54),
             gas_base_fee: Some(1),
             gas_action_fee: Some(2),
             gas_query_fee: Some(3),
-            gas_limit: Some(4),
-        }),
+            gas_limit: Some(42),
+        }))
+        .unwrap(),
+        funds: vec![],
+    };
+    app.execute_contract(
+        Addr::unchecked(ADMIN),
+        factory_addr.clone(),
+        &FactoryExecuteMsg::Proxy { msg },
         &[],
     )
     .unwrap();
+
     let config: Config = app
         .wrap()
         .query_wasm_smart(tasks_addr.clone(), &QueryMsg::Config {})
         .unwrap();
     let expected_config = Config {
-        paused: true,
         version: "0.1".to_owned(),
-        owner_addr: Addr::unchecked(ANYONE),
+        owner_addr: factory_addr.clone(),
+        pause_admin: Addr::unchecked(PAUSE_ADMIN),
         croncat_factory_addr: Addr::unchecked("fixed_croncat_factory_addr"),
         chain_name: "atom".to_owned(),
-        croncat_manager_key: ("manager2".to_owned(), [2, 2]),
-        croncat_agents_key: ("agents2".to_owned(), [2, 2]),
+        croncat_manager_key: ("new_manager2".to_owned(), [2, 2]),
+        croncat_agents_key: ("new_agents2".to_owned(), [2, 2]),
         slot_granularity_time: 54,
         gas_base_fee: 1,
         gas_action_fee: 2,
         gas_query_fee: 3,
-        gas_limit: 4,
+        gas_limit: 42,
     };
 
     assert_eq!(config, expected_config);
 
     // None's shouldn't impact any of the fields
-    app.execute_contract(
-        Addr::unchecked(ADMIN),
-        tasks_addr.clone(),
-        &ExecuteMsg::UpdateConfig(UpdateConfigMsg {
-            paused: None,
-            owner_addr: None,
+    // Call Factory contract's Proxy method, telling it to update Tasks Config and pause the contract
+    let msg = WasmMsg::Execute {
+        contract_addr: tasks_addr.to_string(),
+        msg: to_binary(&ExecuteMsg::UpdateConfig(UpdateConfigMsg {
             croncat_factory_addr: None,
             croncat_manager_key: None,
             croncat_agents_key: None,
@@ -1591,7 +1653,15 @@ fn update_cfg() {
             gas_action_fee: None,
             gas_query_fee: None,
             gas_limit: None,
-        }),
+        }))
+        .unwrap(),
+        funds: vec![],
+    };
+    app.execute_contract(
+        // It was recently changed owners, remember
+        Addr::unchecked(ADMIN),
+        factory_addr.clone(),
+        &FactoryExecuteMsg::Proxy { msg },
         &[],
     )
     .unwrap();
@@ -1615,7 +1685,7 @@ fn negative_create_task() {
 
     let action = Action {
         msg: BankMsg::Send {
-            to_address: "Bob".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT1).to_string(),
             amount: coins(5, DENOM),
         }
         .into(),
@@ -1648,7 +1718,7 @@ fn negative_create_task() {
     // invalid gas limit
     let action1 = Action {
         msg: BankMsg::Send {
-            to_address: "Bob".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT1).to_string(),
             amount: coins(5, DENOM),
         }
         .into(),
@@ -1656,7 +1726,7 @@ fn negative_create_task() {
     };
     let action2 = Action {
         msg: BankMsg::Send {
-            to_address: "Alice".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT0).to_string(),
             amount: coins(5, DENOM),
         }
         .into(),
@@ -1691,7 +1761,7 @@ fn negative_create_task() {
     // Invalid boundary
     let action = Action {
         msg: BankMsg::Send {
-            to_address: "Bob".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT1).to_string(),
             amount: coins(5, DENOM),
         }
         .into(),
@@ -1726,7 +1796,7 @@ fn negative_create_task() {
     // Same task - can't repeat tasks
     let action = Action {
         msg: BankMsg::Send {
-            to_address: "Bob".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT1).to_string(),
             amount: coins(5, DENOM),
         }
         .into(),
@@ -1768,7 +1838,7 @@ fn negative_create_task() {
     // Same task, but with queries - can't repeat tasks
     let action = Action {
         msg: BankMsg::Send {
-            to_address: "Bob".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT1).to_string(),
             amount: coins(5, DENOM),
         }
         .into(),
@@ -1812,28 +1882,18 @@ fn negative_create_task() {
     assert_eq!(err, ContractError::TaskExists {});
     // contract paused
 
-    app.execute_contract(
-        Addr::unchecked(ADMIN),
+    // Pause admin should be able to pause
+    let res = app.execute_contract(
+        Addr::unchecked(PAUSE_ADMIN),
         tasks_addr.clone(),
-        &ExecuteMsg::UpdateConfig(UpdateConfigMsg {
-            paused: Some(true),
-            owner_addr: None,
-            croncat_factory_addr: None,
-            croncat_manager_key: None,
-            croncat_agents_key: None,
-            slot_granularity_time: None,
-            gas_base_fee: None,
-            gas_action_fee: None,
-            gas_query_fee: None,
-            gas_limit: None,
-        }),
+        &ExecuteMsg::PauseContract {},
         &[],
-    )
-    .unwrap();
+    );
+    assert!(res.is_ok());
 
     let action = Action {
         msg: BankMsg::Send {
-            to_address: "Bob".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT1).to_string(),
             amount: coins(5, DENOM),
         }
         .into(),
@@ -1860,7 +1920,7 @@ fn negative_create_task() {
         .unwrap_err()
         .downcast()
         .unwrap();
-    assert_eq!(err, ContractError::Paused {});
+    assert_eq!(err, ContractError::ContractPaused {});
 }
 
 #[test]
@@ -1875,7 +1935,7 @@ fn remove_task_negative() {
 
     let action = Action {
         msg: BankMsg::Send {
-            to_address: "Bob".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT1).to_string(),
             amount: coins(5, DENOM),
         }
         .into(),
@@ -1975,25 +2035,14 @@ fn remove_task_negative() {
 
     assert_eq!(err, ContractError::NoTaskFound {});
 
-    // contract is paused
-    app.execute_contract(
-        Addr::unchecked(ADMIN),
+    // Pause admin should be able to pause
+    let res = app.execute_contract(
+        Addr::unchecked(PAUSE_ADMIN),
         tasks_addr.clone(),
-        &ExecuteMsg::UpdateConfig(UpdateConfigMsg {
-            paused: Some(true),
-            owner_addr: None,
-            croncat_factory_addr: None,
-            croncat_manager_key: None,
-            croncat_agents_key: None,
-            slot_granularity_time: None,
-            gas_base_fee: None,
-            gas_action_fee: None,
-            gas_query_fee: None,
-            gas_limit: None,
-        }),
+        &ExecuteMsg::PauseContract {},
         &[],
-    )
-    .unwrap();
+    );
+    assert!(res.is_ok());
 
     let err: ContractError = app
         .execute_contract(
@@ -2006,7 +2055,7 @@ fn remove_task_negative() {
         .downcast()
         .unwrap();
 
-    assert_eq!(err, ContractError::Paused {});
+    assert_eq!(err, ContractError::ContractPaused {});
 }
 
 #[test]
@@ -2535,7 +2584,7 @@ fn query_slot_hashes_test() {
 
     let action = Action {
         msg: BankMsg::Send {
-            to_address: "Alice".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT0).to_string(),
             amount: coins(10, DENOM),
         }
         .into(),
@@ -2783,7 +2832,7 @@ fn query_slot_tasks_total_test() {
 
     let action = Action {
         msg: BankMsg::Send {
-            to_address: "Alice".to_owned(),
+            to_address: Addr::unchecked(PARTICIPANT0).to_string(),
             amount: coins(10, DENOM),
         }
         .into(),
@@ -2974,4 +3023,829 @@ fn query_slot_tasks_total_test() {
             evented_tasks: 0
         }
     );
+}
+
+#[test]
+fn poc_case1_case2() {
+    let mut app = default_app();
+    let factory_addr = init_factory(&mut app);
+    let instantiate_msg: InstantiateMsg = default_instantiate_msg();
+    let manager_addr = init_manager(&mut app, &factory_addr);
+    let agents_addr = init_agents(&mut app, &factory_addr);
+    let tasks_addr = init_tasks(&mut app, &instantiate_msg, &factory_addr);
+    let task2: Addr = tasks_addr.clone();
+
+    const DEFAULT_FEE: u64 = 5;
+
+    activate_agent(&mut app, &agents_addr);
+
+    //init agent 2
+    app.execute_contract(
+        Addr::unchecked(AGENT1),
+        agents_addr.clone(),
+        &croncat_agents::msg::ExecuteMsg::RegisterAgent {
+            payable_account_id: None,
+        },
+        &[],
+    )
+    .unwrap();
+
+    // Check in - will error but force for later
+    app.execute_contract(
+        Addr::unchecked(AGENT1),
+        agents_addr.clone(),
+        &croncat_agents::msg::ExecuteMsg::CheckInAgent {},
+        &[],
+    )
+    .unwrap_err();
+
+    // wait 100 blocks - simply added this function to /helpers.rs to add 100
+    // blocks and 1900 seconds
+    app.update_block(|block| add_seconds_to_block(block, 3600));
+    app.update_block(|block| increment_block_height(block, Some(100)));
+
+    // Add random task #1
+    let task = croncat_sdk_tasks::types::TaskRequest {
+        interval: Interval::Once,
+        boundary: None,
+        stop_on_fail: false,
+        actions: vec![Action {
+            msg: BankMsg::Send {
+                to_address: "bob".to_owned(),
+                amount: coins(45, DENOM),
+            }
+            .into(),
+            gas_limit: None,
+        }],
+        queries: None,
+        transforms: None,
+        cw20: None,
+    };
+    let _res = app
+        .execute_contract(
+            Addr::unchecked(PARTICIPANT0),
+            tasks_addr.clone(),
+            &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
+                task: Box::new(task),
+            },
+            &coins(600_000, DENOM),
+        )
+        .unwrap();
+    // Add random task #2
+    let task = croncat_sdk_tasks::types::TaskRequest {
+        interval: Interval::Once,
+        boundary: None,
+        stop_on_fail: false,
+        actions: vec![Action {
+            msg: BankMsg::Send {
+                to_address: "bob1".to_owned(),
+                amount: coins(45, DENOM),
+            }
+            .into(),
+            gas_limit: None,
+        }],
+        queries: None,
+        transforms: None,
+        cw20: None,
+    };
+    let _res = app
+        .execute_contract(
+            Addr::unchecked(PARTICIPANT0),
+            tasks_addr.clone(),
+            &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
+                task: Box::new(task),
+            },
+            &coins(600_000, DENOM),
+        )
+        .unwrap();
+    // Add random task #3
+    let task = croncat_sdk_tasks::types::TaskRequest {
+        interval: Interval::Once,
+        boundary: None,
+        stop_on_fail: false,
+        actions: vec![Action {
+            msg: BankMsg::Send {
+                to_address: "bob2".to_owned(),
+                amount: coins(45, DENOM),
+            }
+            .into(),
+            gas_limit: None,
+        }],
+        queries: None,
+        transforms: None,
+        cw20: None,
+    };
+    let _res = app
+        .execute_contract(
+            Addr::unchecked(PARTICIPANT0),
+            tasks_addr.clone(),
+            &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
+                task: Box::new(task),
+            },
+            &coins(600_000, DENOM),
+        )
+        .unwrap();
+    // random task 4
+    let task = croncat_sdk_tasks::types::TaskRequest {
+        interval: Interval::Once,
+        boundary: None,
+        stop_on_fail: false,
+        actions: vec![Action {
+            msg: BankMsg::Send {
+                to_address: "bob3".to_owned(),
+                amount: coins(45, DENOM),
+            }
+            .into(),
+            gas_limit: None,
+        }],
+        queries: None,
+        transforms: None,
+        cw20: None,
+    };
+    let _res = app
+        .execute_contract(
+            Addr::unchecked(PARTICIPANT0),
+            tasks_addr.clone(),
+            &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
+                task: Box::new(task),
+            },
+            &coins(600_000, DENOM),
+        )
+        .unwrap();
+    // Add TARGET BLOCK TASK 1
+    let task = croncat_sdk_tasks::types::TaskRequest {
+        interval: Interval::Block(3),
+        // repeat it three times
+        boundary: Some(Boundary::Height(BoundaryHeight {
+            start: None,
+            end: Some((app.block_info().height + 8).into()),
+        })),
+        stop_on_fail: false,
+        actions: vec![
+            Action {
+                msg: BankMsg::Send {
+                    to_address: "alice".to_owned(),
+                    amount: coins(123, DENOM),
+                }
+                .into(),
+                gas_limit: None,
+            },
+            Action {
+                msg: BankMsg::Send {
+                    to_address: "bob".to_owned(),
+                    amount: coins(321, DENOM),
+                }
+                .into(),
+                gas_limit: None,
+            },
+        ],
+        queries: None,
+        transforms: None,
+        cw20: None,
+    };
+    let res = app
+        .execute_contract(
+            Addr::unchecked(PARTICIPANT0),
+            tasks_addr.clone(),
+            &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
+                task: Box::new(task),
+            },
+            &coins(600_000, DENOM),
+        )
+        .unwrap();
+    let task_hash = String::from_vec(res.data.unwrap().0).unwrap();
+    let _t2: String = task_hash.clone();
+    let task_response: TaskResponse = app
+        .wrap()
+        .query_wasm_smart(
+            tasks_addr.clone(),
+            &croncat_sdk_tasks::msg::TasksQueryMsg::Task {
+                task_hash: task_hash.clone(),
+            },
+        )
+        .unwrap();
+    let gas_needed = task_response.task.unwrap().amount_for_one_task.gas as f64 * 1.5;
+    let _expected_gone_amount = {
+        let gas_fees = gas_needed * (DEFAULT_FEE + DEFAULT_FEE) as f64 / 100.0;
+        let amount_for_task = gas_needed * 0.04;
+        let amount_for_fees = gas_fees * 0.04;
+        amount_for_task + amount_for_fees + 321.0 + 123.0
+    } as u128;
+
+    // Add more time to pass agent nomination
+    app.update_block(|block| add_seconds_to_block(block, 3600));
+    app.update_block(|block| increment_block_height(block, Some(100)));
+
+    // Check in - this will pass
+    app.execute_contract(
+        Addr::unchecked(AGENT1),
+        agents_addr.clone(),
+        &croncat_agents::msg::ExecuteMsg::CheckInAgent {},
+        &[],
+    )
+    .unwrap();
+
+    // ###### END SETUP ###
+
+    let current_task: TaskResponse = app
+        .wrap()
+        .query_wasm_smart(
+            tasks_addr.clone(),
+            &croncat_sdk_tasks::msg::TasksQueryMsg::CurrentTask {},
+        )
+        .unwrap();
+
+    // random task 4 from above - only
+    let _current_hash: String = current_task.task.unwrap().task_hash;
+
+    // Agent 0 legitimately calls the tasks contract to execute a task
+    let _res0 = app
+        .execute_contract(
+            Addr::unchecked(AGENT0),
+            manager_addr.clone(),
+            &ManagerExecuteMsg::ProxyCall { task_hash: None },
+            &[],
+        )
+        .unwrap();
+
+    // ### CASE 1 ###
+    // Prove no evented tasks
+    let tasks_for_agent: Option<Vec<croncat_sdk_tasks::types::TaskInfo>> = app
+        .wrap()
+        .query_wasm_smart(
+            tasks_addr,
+            &croncat_sdk_tasks::msg::TasksQueryMsg::EventedTasks {
+                start: None,
+                from_index: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert!(tasks_for_agent.unwrap().is_empty());
+
+    // Agent 1 is able to call a block task directly by its hash
+    // TARGET BLOCK TASK 1 from above
+    // this is not evented so it should not be able to be called directly by any agent
+    let res1_error: croncat_manager::ContractError = app
+        .execute_contract(
+            Addr::unchecked(AGENT1),
+            manager_addr.clone(),
+            &ManagerExecuteMsg::ProxyCall {
+                task_hash: Some(task_hash),
+            },
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(
+        res1_error,
+        croncat_manager::ContractError::NoTaskForAgent {}
+    );
+
+    // ### CASE 2 ##
+    // Add TARGET BLOCK TASK 1
+    let task = croncat_sdk_tasks::types::TaskRequest {
+        interval: Interval::Block(3),
+        // repeat it three times
+        boundary: Some(Boundary::Height(BoundaryHeight {
+            start: None,
+            end: Some((app.block_info().height + 8).into()),
+        })),
+        stop_on_fail: false,
+        actions: vec![
+            Action {
+                msg: BankMsg::Send {
+                    to_address: "alice".to_owned(),
+                    amount: coins(123, DENOM),
+                }
+                .into(),
+                gas_limit: None,
+            },
+            Action {
+                msg: BankMsg::Send {
+                    to_address: "bob".to_owned(),
+                    amount: coins(321, DENOM),
+                }
+                .into(),
+                gas_limit: None,
+            },
+        ],
+        queries: None,
+        transforms: None,
+        cw20: None,
+    };
+    let res = app
+        .execute_contract(
+            Addr::unchecked(PARTICIPANT0),
+            task2.clone(),
+            &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
+                task: Box::new(task),
+            },
+            &coins(600_000, DENOM),
+        )
+        .unwrap();
+    let task_hash = String::from_vec(res.data.unwrap().0).unwrap();
+    let _t2: String = task_hash.clone();
+    let _task_response: TaskResponse = app
+        .wrap()
+        .query_wasm_smart(
+            task2.clone(),
+            &croncat_sdk_tasks::msg::TasksQueryMsg::Task { task_hash },
+        )
+        .unwrap();
+
+    // create a task with the owner address - should error
+    // Actions message unsupported or invalid message data
+    let task = croncat_sdk_tasks::types::TaskRequest {
+        interval: Interval::Once,
+        boundary: None,
+        stop_on_fail: false,
+        actions: vec![Action {
+            msg: WasmMsg::Execute {
+                contract_addr: manager_addr.to_string(),
+                msg: to_binary(&croncat_sdk_manager::msg::ManagerExecuteMsg::OwnerWithdraw {})
+                    .unwrap(),
+                funds: Default::default(),
+            }
+            .into(),
+            gas_limit: Some(250_000),
+        }],
+        queries: None,
+        transforms: None,
+        cw20: None,
+    };
+
+    // passing message with uppercase manager address
+    let _mod_balances = init_mod_balances(&mut app, &factory_addr);
+    let _res = app
+        .execute_contract(
+            Addr::unchecked(PARTICIPANT0),
+            task2.clone(),
+            &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
+                task: Box::new(task),
+            },
+            &coins(600_000, DENOM),
+        )
+        .unwrap_err();
+    let malicious_task = croncat_sdk_tasks::types::TaskRequest {
+        interval: Interval::Once,
+        boundary: None,
+        stop_on_fail: false,
+        actions: vec![Action {
+            msg: WasmMsg::Execute {
+                contract_addr: manager_addr.to_string().to_uppercase(),
+                msg: to_binary(&croncat_sdk_manager::msg::ManagerExecuteMsg::OwnerWithdraw {})
+                    .unwrap(),
+                funds: Default::default(),
+            }
+            .into(),
+            gas_limit: Some(250_000),
+        }],
+        queries: None,
+        transforms: None,
+        cw20: None,
+    };
+
+    // Need this to fail to check correct coverage
+    let error: ContractError = app
+        .execute_contract(
+            Addr::unchecked(PARTICIPANT0),
+            task2.clone(),
+            &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
+                task: Box::new(malicious_task),
+            },
+            &coins(600_000, DENOM),
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(
+        error,
+        ContractError::Std(StdError::generic_err(
+            "Invalid input: address not normalized"
+        ))
+    );
+
+    let malicious_task2 = croncat_sdk_tasks::types::TaskRequest {
+        interval: Interval::Once,
+        boundary: None,
+        stop_on_fail: false,
+        actions: vec![Action {
+            msg: BankMsg::Send {
+                to_address: manager_addr.to_string().to_uppercase(),
+                // to_address: "bob".to_owned(),
+                amount: coins(123, DENOM),
+            }
+            .into(),
+            gas_limit: Some(250_000),
+        }],
+        queries: None,
+        transforms: None,
+        cw20: None,
+    };
+
+    // Need this to fail to check correct coverage
+    let error: ContractError = app
+        .execute_contract(
+            Addr::unchecked(PARTICIPANT0),
+            task2,
+            &croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask {
+                task: Box::new(malicious_task2),
+            },
+            &coins(600_000, DENOM),
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(error, ContractError::InvalidAddress {});
+}
+
+#[test]
+fn invalid_gas_config() {
+    let mut app = default_app();
+    let factory_addr = init_factory(&mut app);
+    let code_id = app.store_code(contracts::croncat_tasks_contract());
+
+    let mut instantiate_msg: InstantiateMsg = default_instantiate_msg();
+    // We introduce an invalid value to the Task instantiate message
+    instantiate_msg.slot_granularity_time = Some(0);
+
+    // Set up errors we'll check against
+    let err_slot_granularity_time = ContractError::InvalidZeroValue {
+        field: "slot_granularity_time".to_string(),
+    };
+    let err_invalid_gas = ContractError::InvalidGas {};
+
+    let module_instantiate_info = ModuleInstantiateInfo {
+        code_id,
+        version: [0, 1],
+        commit_id: "commit1".to_owned(),
+        checksum: "checksum2".to_owned(),
+        changelog_url: None,
+        schema: None,
+        msg: to_binary(&instantiate_msg).unwrap(),
+        contract_name: "tasks".to_owned(),
+    };
+    let mut err: ContractError = app
+        .execute_contract(
+            Addr::unchecked(ADMIN),
+            factory_addr.to_owned(),
+            &croncat_factory::msg::ExecuteMsg::Deploy {
+                kind: VersionKind::Tasks,
+                module_instantiate_info,
+            },
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(err, err_slot_granularity_time);
+
+    // Reset the slot_granularity_time and check an invalid value for gas_limit
+    instantiate_msg.slot_granularity_time = None;
+    // This value is too low
+    instantiate_msg.gas_limit = Some(1);
+
+    let module_instantiate_info = ModuleInstantiateInfo {
+        code_id,
+        version: [0, 1],
+        commit_id: "commit1".to_owned(),
+        checksum: "checksum2".to_owned(),
+        changelog_url: None,
+        schema: None,
+        msg: to_binary(&instantiate_msg).unwrap(),
+        contract_name: "tasks".to_owned(),
+    };
+    err = app
+        .execute_contract(
+            Addr::unchecked(ADMIN),
+            factory_addr.to_owned(),
+            &croncat_factory::msg::ExecuteMsg::Deploy {
+                kind: VersionKind::Tasks,
+                module_instantiate_info,
+            },
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(err, err_invalid_gas);
+
+    // Now we allow for successful instantiation by setting it back to a working instantiate message
+    instantiate_msg.gas_limit = None;
+
+    let module_instantiate_info = ModuleInstantiateInfo {
+        code_id,
+        version: [0, 1],
+        commit_id: "commit1".to_owned(),
+        checksum: "checksum2".to_owned(),
+        changelog_url: None,
+        schema: None,
+        msg: to_binary(&instantiate_msg).unwrap(),
+        contract_name: "tasks".to_owned(),
+    };
+    assert!(
+        app.execute_contract(
+            Addr::unchecked(ADMIN),
+            factory_addr.to_owned(),
+            &croncat_factory::msg::ExecuteMsg::Deploy {
+                kind: VersionKind::Tasks,
+                module_instantiate_info,
+            },
+            &[],
+        )
+        .is_ok(),
+        "Tasks contract should instantiate successfully"
+    );
+
+    // Get the Tasks contract address
+    let metadata: ContractMetadataResponse = app
+        .wrap()
+        .query_wasm_smart(
+            &factory_addr,
+            &croncat_factory::msg::QueryMsg::LatestContract {
+                contract_name: "tasks".to_owned(),
+            },
+        )
+        .unwrap();
+    let tasks_addr = metadata.metadata.unwrap().contract_addr;
+
+    // Ensure that invalid config updates fail
+    // Test failure when gas_limit is too low (should be more than the sum of other gas_* values)
+    let mut update_msg = UpdateConfigMsg {
+        croncat_factory_addr: Some("fixed_croncat_factory_addr".to_owned()),
+        croncat_manager_key: Some(("manager2".to_owned(), [2, 2])),
+        croncat_agents_key: Some(("agents2".to_owned(), [2, 2])),
+        slot_granularity_time: Some(54),
+        gas_base_fee: Some(1),
+        gas_action_fee: Some(2),
+        gas_query_fee: Some(3),
+        // This should be higher and will fail
+        gas_limit: Some(4),
+    };
+
+    let mut msg = WasmMsg::Execute {
+        contract_addr: tasks_addr.to_string(),
+        msg: to_binary(&ExecuteMsg::UpdateConfig(update_msg.clone())).unwrap(),
+        funds: vec![],
+    };
+    let err: ContractError = app
+        .execute_contract(
+            Addr::unchecked(ADMIN),
+            factory_addr.clone(),
+            &FactoryExecuteMsg::Proxy { msg },
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+
+    assert_eq!(err, err_invalid_gas);
+
+    // Reset gas_limit and set invalid value for slot_granularity_time
+    update_msg.gas_limit = None;
+    update_msg.slot_granularity_time = Some(0);
+
+    msg = WasmMsg::Execute {
+        contract_addr: tasks_addr.to_string(),
+        msg: to_binary(&ExecuteMsg::UpdateConfig(update_msg)).unwrap(),
+        funds: vec![],
+    };
+    let err: ContractError = app
+        .execute_contract(
+            Addr::unchecked(ADMIN),
+            factory_addr,
+            &FactoryExecuteMsg::Proxy { msg },
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+
+    assert_eq!(err, err_slot_granularity_time);
+}
+
+/// Check for instantiate pause admin scenarios of pass/fail
+/// Check for pause & unpause scenarios of pass/fail
+#[test]
+fn pause_admin_cases() {
+    let mut app = default_app();
+
+    let factory_code_id = app.store_code(contracts::croncat_factory_contract());
+    let tasks_code_id = app.store_code(contracts::croncat_tasks_contract());
+
+    let init_msg = croncat_sdk_factory::msg::FactoryInstantiateMsg {
+        owner_addr: Some(ADMIN.to_owned()),
+    };
+    let croncat_factory_addr = app
+        .instantiate_contract(
+            factory_code_id,
+            Addr::unchecked(ADMIN),
+            &init_msg,
+            &[],
+            "factory",
+            None,
+        )
+        .unwrap();
+
+    let init_tasks_contract_msg = InstantiateMsg {
+        chain_name: "cron".to_owned(),
+        version: Some("0.1".to_owned()),
+        pause_admin: Addr::unchecked(PAUSE_ADMIN),
+        croncat_manager_key: ("definitely_not_manager".to_owned(), [4, 2]),
+        croncat_agents_key: ("definitely_not_agents".to_owned(), [42, 0]),
+        slot_granularity_time: Some(10),
+        gas_base_fee: Some(1),
+        gas_action_fee: Some(2),
+        gas_query_fee: Some(3),
+        gas_limit: Some(10),
+    };
+    // Attempt to initialize with short address for pause_admin
+    let mut init_tasks_contract_msg_short_addr = init_tasks_contract_msg.clone();
+    init_tasks_contract_msg_short_addr.pause_admin = Addr::unchecked(ANYONE);
+    // Attempt to initialize with same owner address for pause_admin
+    let mut init_tasks_contract_msg_same_owner = init_tasks_contract_msg.clone();
+    init_tasks_contract_msg_same_owner.pause_admin = Addr::unchecked(ADMIN);
+
+    // Should fail: shorty addr
+    let tasks_module_instantiate_info = croncat_sdk_factory::msg::ModuleInstantiateInfo {
+        code_id: tasks_code_id,
+        version: [0, 1],
+        commit_id: "some".to_owned(),
+        checksum: "qwe123".to_owned(),
+        changelog_url: None,
+        schema: None,
+        msg: to_binary(&init_tasks_contract_msg_short_addr).unwrap(),
+        contract_name: "tasks".to_owned(),
+    };
+    let err: ContractError = app
+        .execute_contract(
+            Addr::unchecked(ADMIN),
+            croncat_factory_addr.clone(),
+            &croncat_sdk_factory::msg::FactoryExecuteMsg::Deploy {
+                kind: croncat_sdk_factory::msg::VersionKind::Tasks,
+                module_instantiate_info: tasks_module_instantiate_info,
+            },
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(err, ContractError::InvalidPauseAdmin {});
+
+    // Should fail: same as owner
+    let tasks_module_instantiate_info = croncat_sdk_factory::msg::ModuleInstantiateInfo {
+        code_id: tasks_code_id,
+        version: [0, 1],
+        commit_id: "some".to_owned(),
+        checksum: "qwe123".to_owned(),
+        changelog_url: None,
+        schema: None,
+        msg: to_binary(&init_tasks_contract_msg_same_owner).unwrap(),
+        contract_name: "tasks".to_owned(),
+    };
+    let err: ContractError = app
+        .execute_contract(
+            Addr::unchecked(ADMIN),
+            croncat_factory_addr.clone(),
+            &croncat_sdk_factory::msg::FactoryExecuteMsg::Deploy {
+                kind: croncat_sdk_factory::msg::VersionKind::Tasks,
+                module_instantiate_info: tasks_module_instantiate_info,
+            },
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(err, ContractError::InvalidPauseAdmin {});
+
+    // Now, we do a working furr shurr case
+    let tasks_module_instantiate_info = croncat_sdk_factory::msg::ModuleInstantiateInfo {
+        code_id: tasks_code_id,
+        version: [0, 1],
+        commit_id: "some".to_owned(),
+        checksum: "qwe123".to_owned(),
+        changelog_url: None,
+        schema: None,
+        msg: to_binary(&init_tasks_contract_msg).unwrap(),
+        contract_name: "tasks".to_owned(),
+    };
+
+    // Successfully deploy agents contract
+    app.execute_contract(
+        Addr::unchecked(ADMIN),
+        croncat_factory_addr.clone(),
+        &croncat_sdk_factory::msg::FactoryExecuteMsg::Deploy {
+            kind: croncat_sdk_factory::msg::VersionKind::Tasks,
+            module_instantiate_info: tasks_module_instantiate_info,
+        },
+        &[],
+    )
+    .unwrap();
+
+    // Get tasks contract address
+    let tasks_contracts: ContractMetadataResponse = app
+        .wrap()
+        .query_wasm_smart(
+            croncat_factory_addr.clone(),
+            &croncat_sdk_factory::msg::FactoryQueryMsg::LatestContract {
+                contract_name: "tasks".to_string(),
+            },
+        )
+        .unwrap();
+    assert!(
+        tasks_contracts.metadata.is_some(),
+        "Should be contract metadata"
+    );
+    let tasks_metadata = tasks_contracts.metadata.unwrap();
+    let croncat_tasks_addr = tasks_metadata.contract_addr;
+
+    // Owner Should not be able to pause, not pause_admin
+    let error: ContractError = app
+        .execute_contract(
+            Addr::unchecked(ADMIN),
+            croncat_tasks_addr.clone(),
+            &ExecuteMsg::PauseContract {},
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(error, ContractError::Unauthorized {});
+    // Anyone Should not be able to pause, not pause_admin
+    let error: ContractError = app
+        .execute_contract(
+            Addr::unchecked(ANYONE),
+            croncat_tasks_addr.clone(),
+            &ExecuteMsg::PauseContract {},
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(error, ContractError::Unauthorized {});
+
+    // Pause admin should be able to pause
+    let res = app.execute_contract(
+        Addr::unchecked(PAUSE_ADMIN),
+        croncat_tasks_addr.clone(),
+        &ExecuteMsg::PauseContract {},
+        &[],
+    );
+    assert!(res.is_ok());
+
+    // Check the pause query is valid
+    let is_paused: bool = app
+        .wrap()
+        .query_wasm_smart(croncat_tasks_addr.clone(), &QueryMsg::Paused {})
+        .unwrap();
+    assert!(is_paused);
+
+    // Pause Admin Should not be able to unpause
+    let error: ContractError = app
+        .execute_contract(
+            Addr::unchecked(PAUSE_ADMIN),
+            croncat_tasks_addr.clone(),
+            &ExecuteMsg::UnpauseContract {},
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(error, ContractError::Unauthorized {});
+    // Anyone Should not be able to unpause
+    let error: ContractError = app
+        .execute_contract(
+            Addr::unchecked(ANYONE),
+            croncat_tasks_addr.clone(),
+            &ExecuteMsg::UnpauseContract {},
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(error, ContractError::Unauthorized {});
+
+    // Owner should be able to unpause
+    let res = app.execute_contract(
+        Addr::unchecked(ADMIN),
+        croncat_factory_addr,
+        &croncat_sdk_factory::msg::FactoryExecuteMsg::Proxy {
+            msg: WasmMsg::Execute {
+                contract_addr: croncat_tasks_addr.to_string(),
+                msg: to_binary(&ExecuteMsg::UnpauseContract {}).unwrap(),
+                funds: vec![],
+            },
+        },
+        &[],
+    );
+    assert!(res.is_ok());
+
+    // Confirm unpaused
+    let is_paused: bool = app
+        .wrap()
+        .query_wasm_smart(croncat_tasks_addr, &QueryMsg::Paused {})
+        .unwrap();
+    assert!(!is_paused);
 }

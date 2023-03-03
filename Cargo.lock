@@ -237,6 +237,7 @@ dependencies = [
  "anyhow",
  "cosmwasm-schema",
  "cosmwasm-std",
+ "croncat-agents",
  "croncat-factory",
  "croncat-manager",
  "croncat-sdk-agents",
@@ -263,6 +264,7 @@ dependencies = [
  "croncat-agents",
  "croncat-manager",
  "croncat-mod-balances",
+ "croncat-sdk-core",
  "croncat-sdk-factory",
  "croncat-sdk-manager",
  "croncat-tasks",
@@ -388,6 +390,7 @@ dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
  "cw20 0.16.0",
+ "thiserror",
 ]
 
 [[package]]
@@ -435,6 +438,7 @@ dependencies = [
  "croncat-agents",
  "croncat-factory",
  "croncat-manager",
+ "croncat-mod-balances",
  "croncat-sdk-agents",
  "croncat-sdk-core",
  "croncat-sdk-factory",

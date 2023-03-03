@@ -18,14 +18,22 @@ export interface ModDaoReadOnlyInterface {
     status: Status;
   }) => Promise<QueryResponseForBinary>;
   hasPassedProposals: ({
-    daoAddress
+    daoAddress,
+    limit,
+    startAfter
   }: {
     daoAddress: string;
+    limit?: number;
+    startAfter?: number;
   }) => Promise<QueryResponseForBinary>;
   hasPassedProposalWithMigration: ({
-    daoAddress
+    daoAddress,
+    limit,
+    startAfter
   }: {
     daoAddress: string;
+    limit?: number;
+    startAfter?: number;
   }) => Promise<QueryResponseForBinary>;
   hasProposalsGtId: ({
     daoAddress,
@@ -66,24 +74,36 @@ export class ModDaoQueryClient implements ModDaoReadOnlyInterface {
     });
   };
   hasPassedProposals = async ({
-    daoAddress
+    daoAddress,
+    limit,
+    startAfter
   }: {
     daoAddress: string;
+    limit?: number;
+    startAfter?: number;
   }): Promise<QueryResponseForBinary> => {
     return this.client.queryContractSmart(this.contractAddress, {
       has_passed_proposals: {
-        dao_address: daoAddress
+        dao_address: daoAddress,
+        limit,
+        start_after: startAfter
       }
     });
   };
   hasPassedProposalWithMigration = async ({
-    daoAddress
+    daoAddress,
+    limit,
+    startAfter
   }: {
     daoAddress: string;
+    limit?: number;
+    startAfter?: number;
   }): Promise<QueryResponseForBinary> => {
     return this.client.queryContractSmart(this.contractAddress, {
       has_passed_proposal_with_migration: {
-        dao_address: daoAddress
+        dao_address: daoAddress,
+        limit,
+        start_after: startAfter
       }
     });
   };

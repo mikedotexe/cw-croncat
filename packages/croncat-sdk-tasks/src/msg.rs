@@ -1,4 +1,5 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
+use cosmwasm_std::Addr;
 use croncat_sdk_core::internal_messages::tasks::{TasksRemoveTaskByManager, TasksRescheduleTask};
 
 use crate::types::TaskRequest;
@@ -11,8 +12,11 @@ pub struct TasksInstantiateMsg {
     /// Assigned by Factory, denotes the version of this contract (CW2 spec) & used as the task verion as well.
     pub version: Option<String>,
 
-    /// Address of the contract owner, defaults to the sender
-    pub owner_addr: Option<String>,
+    /// A multisig admin whose sole responsibility is to pause the contract in event of emergency.
+    /// Must be a different contract address than DAO, cannot be a regular keypair
+    /// Does not have the ability to unpause, must rely on the DAO to assess the situation and act accordingly
+    pub pause_admin: Addr,
+
     /// Name of the key for raw querying Manager address from the factory
     pub croncat_manager_key: (String, [u8; 2]),
     /// Name of the key for raw querying Agents address from the factory
@@ -34,8 +38,6 @@ pub struct TasksInstantiateMsg {
 
 #[cw_serde]
 pub struct UpdateConfigMsg {
-    pub paused: Option<bool>,
-    pub owner_addr: Option<String>,
     pub croncat_factory_addr: Option<String>,
     pub croncat_manager_key: Option<(String, [u8; 2])>,
     pub croncat_agents_key: Option<(String, [u8; 2])>,
@@ -65,6 +67,10 @@ pub enum TasksExecuteMsg {
     RemoveTaskByManager(TasksRemoveTaskByManager),
     /// Try to reschedule a task, if possible, used by the manager
     RescheduleTask(TasksRescheduleTask),
+    /// Pauses all operations for this contract, can only be done by pause_admin
+    PauseContract {},
+    /// unpauses all operations for this contract, can only be unpaused by owner_addr
+    UnpauseContract {},
 }
 
 #[cw_serde]
@@ -72,6 +78,9 @@ pub enum TasksExecuteMsg {
 pub enum TasksQueryMsg {
     #[returns(crate::types::Config)]
     Config {},
+    /// Helper for query responses on versioned contracts
+    #[returns[bool]]
+    Paused {},
     /// Get the total amount of tasks
     #[returns(cosmwasm_std::Uint64)]
     TasksTotal {},
@@ -109,7 +118,7 @@ pub enum TasksQueryMsg {
         limit: Option<u64>,
     },
     /// Get tasks created by the given address
-    #[returns(Vec<crate::types::TaskResponse>)]
+    #[returns(Vec<crate::types::TaskInfo>)]
     TasksByOwner {
         owner_addr: String,
         from_index: Option<u64>,

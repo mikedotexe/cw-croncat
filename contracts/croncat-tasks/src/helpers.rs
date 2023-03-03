@@ -60,17 +60,17 @@ pub(crate) fn check_for_self_calls(
     tasks_addr: &Addr,
     manager_addr: &Addr,
     agents_addr: &Addr,
-    manager_owner_addr: &Addr,
+    owner_addr: &Addr,
     sender: &Addr,
-    contract_addr: &String,
+    contract_addr: &Addr,
     msg: &Binary,
 ) -> Result<(), ContractError> {
-    // If it one of the our contracts it should be a manager
-    if contract_addr == tasks_addr || contract_addr == agents_addr {
+    // If its one of the our contracts it should be a agents contract only
+    if contract_addr == tasks_addr || contract_addr == manager_addr {
         return Err(ContractError::InvalidAction {});
-    } else if contract_addr == manager_addr {
+    } else if contract_addr == agents_addr {
         // Check if caller is manager owner
-        if sender != manager_owner_addr {
+        if sender != owner_addr {
             return Err(ContractError::InvalidAction {});
         } else if let Ok(msg) = cosmwasm_std::from_binary(msg) {
             // Check if it's tick
@@ -92,19 +92,22 @@ pub(crate) fn validate_msg_calculate_usage(
     sender: &Addr,
     config: &Config,
 ) -> Result<AmountForOneTask, ContractError> {
-    let mut amount_for_one_task = AmountForOneTask {
-        gas: config.gas_base_fee,
-        cw20: None,
-        coin: [None, None],
-    };
-
     let manager_addr = get_manager_addr(&deps.querier, config)?;
     let agents_addr = get_agents_addr(&deps.querier, config)?;
 
-    let manager_conf: croncat_sdk_manager::types::Config = deps.querier.query_wasm_smart(
+    let manager_config: croncat_sdk_manager::types::Config = deps.querier.query_wasm_smart(
         &manager_addr,
         &croncat_sdk_manager::msg::ManagerQueryMsg::Config {},
     )?;
+
+    let mut amount_for_one_task = AmountForOneTask {
+        cw20: None,
+        coin: [None, None],
+        gas: config.gas_base_fee,
+        agent_fee: manager_config.agent_fee,
+        treasury_fee: manager_config.treasury_fee,
+        gas_price: manager_config.gas_price,
+    };
 
     if task.actions.is_empty() {
         return Err(ContractError::InvalidAction {});
@@ -127,12 +130,12 @@ pub(crate) fn validate_msg_calculate_usage(
                     }
                 }
                 check_for_self_calls(
-                    self_addr,
-                    &manager_addr,
-                    &agents_addr,
-                    &manager_conf.owner_addr,
-                    sender,
-                    contract_addr,
+                    &deps.api.addr_validate(self_addr.as_str())?,
+                    &deps.api.addr_validate(manager_addr.as_str())?,
+                    &deps.api.addr_validate(agents_addr.as_str())?,
+                    &deps.api.addr_validate(config.owner_addr.as_str())?,
+                    &deps.api.addr_validate(sender.as_str())?,
+                    &deps.api.addr_validate(contract_addr.as_str())?,
                     msg,
                 )?;
                 if let Ok(cw20_msg) = cosmwasm_std::from_binary(msg) {
@@ -159,10 +162,11 @@ pub(crate) fn validate_msg_calculate_usage(
                     }
                 }
             }
-            CosmosMsg::Bank(BankMsg::Send {
-                to_address: _,
-                amount,
-            }) => {
+            CosmosMsg::Bank(BankMsg::Send { to_address, amount }) => {
+                // Only valid addresses
+                if deps.api.addr_validate(to_address).is_err() {
+                    return Err(ContractError::InvalidAddress {});
+                }
                 // Restrict no-coin transfer
                 if amount.is_empty() {
                     return Err(ContractError::InvalidAction {});

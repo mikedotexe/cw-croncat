@@ -1,23 +1,24 @@
-use crate::types::{GasPrice, UpdateConfig};
+use crate::types::UpdateConfig;
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::Uint128;
+use cosmwasm_std::{Addr, Uint128};
 use croncat_sdk_core::internal_messages::agents::AgentWithdrawOnRemovalArgs;
 use croncat_sdk_core::internal_messages::manager::{ManagerCreateTaskBalance, ManagerRemoveTask};
+use croncat_sdk_core::types::GasPrice;
 
 use cw20::Cw20Coin;
 
 #[cw_serde]
 pub struct ManagerInstantiateMsg {
-    /// The native denominator of current chain
-    pub denom: String,
     /// CW2 Version provided by factory
     pub version: Option<String>,
     /// Name of the key for raw querying Tasks address from the factory
     pub croncat_tasks_key: (String, [u8; 2]),
     /// Name of the key for raw querying Agents address from the factory
     pub croncat_agents_key: (String, [u8; 2]),
-    /// Address of the contract owner, defaults to the sender
-    pub owner_addr: Option<String>,
+    /// A multisig admin whose sole responsibility is to pause the contract in event of emergency.
+    /// Must be a different contract address than DAO, cannot be a regular keypair
+    /// Does not have the ability to unpause, must rely on the DAO to assess the situation and act accordingly
+    pub pause_admin: Addr,
     /// Gas prices that expected to be used by the agent
     pub gas_price: Option<GasPrice>,
 
@@ -54,7 +55,7 @@ pub enum ManagerExecuteMsg {
     Receive(cw20::Cw20ReceiveMsg),
 
     /// Create task's balance, called by the tasks contract
-    CreateTaskBalance(ManagerCreateTaskBalance),
+    CreateTaskBalance(Box<ManagerCreateTaskBalance>),
 
     /// Remove task's balance, called by the tasks contract
     RemoveTask(ManagerRemoveTask),
@@ -70,6 +71,11 @@ pub enum ManagerExecuteMsg {
 
     /// Withdraw agent rewards on agent removal, this should be called only by agent contract
     AgentWithdraw(Option<AgentWithdrawOnRemovalArgs>),
+
+    /// Pauses all operations for this contract, can only be done by pause_admin
+    PauseContract {},
+    /// unpauses all operations for this contract, can only be unpaused by owner_addr
+    UnpauseContract {},
 }
 
 #[cw_serde]
@@ -78,6 +84,11 @@ pub enum ManagerQueryMsg {
     /// Gets current croncat config
     #[returns(crate::types::Config)]
     Config {},
+
+    /// Helper for query responses on versioned contracts
+    #[returns[bool]]
+    Paused {},
+
     /// Gets manager available balances
     #[returns(cosmwasm_std::Uint128)]
     TreasuryBalance {},

@@ -10,6 +10,17 @@ description = "Provides CosmWasm queries of DAO contracts, helpful when making C
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[profile.release]
+codegen-units = 1
+opt-level = 3
+debug = false
+rpath = false
+lto = true
+debug-assertions = false
+panic = 'abort'
+incremental = false
+overflow-checks = true
+
 [features]
 # for more explicit tests, cargo test --features=backtraces
 backtraces = ["cosmwasm-std/backtraces"]

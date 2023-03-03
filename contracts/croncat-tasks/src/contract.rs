@@ -1,3 +1,4 @@
+use crate::ContractError::InvalidZeroValue;
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
@@ -7,6 +8,7 @@ use cosmwasm_std::{
 use croncat_sdk_core::internal_messages::agents::AgentOnTaskCreated;
 use croncat_sdk_core::internal_messages::manager::{ManagerCreateTaskBalance, ManagerRemoveTask};
 use croncat_sdk_core::internal_messages::tasks::{TasksRemoveTaskByManager, TasksRescheduleTask};
+use croncat_sdk_core::types::{DEFAULT_PAGINATION_FROM_INDEX, DEFAULT_PAGINATION_LIMIT};
 use croncat_sdk_tasks::msg::UpdateConfigMsg;
 use croncat_sdk_tasks::types::{
     Config, CurrentTaskInfoResponse, Interval, SlotHashesResponse, SlotIdsResponse,
@@ -23,7 +25,7 @@ use crate::helpers::{
 };
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{
-    tasks_map, BLOCK_SLOTS, CONFIG, EVENTED_TASKS_LOOKUP, LAST_TASK_CREATION, TASKS_TOTAL,
+    tasks_map, BLOCK_SLOTS, CONFIG, EVENTED_TASKS_LOOKUP, LAST_TASK_CREATION, PAUSED, TASKS_TOTAL,
     TIME_SLOTS,
 };
 
@@ -48,7 +50,7 @@ pub fn instantiate(
     let InstantiateMsg {
         chain_name,
         version,
-        owner_addr,
+        pause_admin,
         croncat_manager_key,
         croncat_agents_key,
         slot_granularity_time,
@@ -58,18 +60,27 @@ pub fn instantiate(
         gas_query_fee,
     } = msg;
 
+    validate_non_zero_value(slot_granularity_time, "slot_granularity_time")?;
+
     let contract_version = version.unwrap_or_else(|| CONTRACT_VERSION.to_string());
     set_contract_version(deps.storage, CONTRACT_NAME, &contract_version)?;
 
-    let owner_addr = owner_addr
-        .map(|human| deps.api.addr_validate(&human))
-        .transpose()?
-        .unwrap_or_else(|| info.sender.clone());
+    let owner_addr = info.sender.clone();
+
+    // Validate pause_admin
+    // MUST: only be contract address
+    // MUST: not be same address as factory owner (DAO)
+    // Any factory action should be done by the owner_addr
+    let pause_addr = deps.api.addr_validate(pause_admin.as_str())?;
+    if owner_addr == pause_addr || pause_addr.to_string().len() != 63 {
+        return Err(ContractError::InvalidPauseAdmin {});
+    }
+
     let config = Config {
-        paused: false,
         chain_name,
         version: contract_version,
         owner_addr,
+        pause_admin,
         croncat_factory_addr: info.sender,
         croncat_manager_key,
         croncat_agents_key,
@@ -79,8 +90,13 @@ pub fn instantiate(
         gas_query_fee: gas_query_fee.unwrap_or(GAS_QUERY_FEE),
         gas_limit: gas_limit.unwrap_or(GAS_LIMIT),
     };
+
+    // Ensure the new gas limit will work
+    validate_gas_limit(&config)?;
+
     // Save initializing states
     CONFIG.save(deps.storage, &config)?;
+    PAUSED.save(deps.storage, &false)?;
     TASKS_TOTAL.save(deps.storage, &0)?;
     Ok(Response::new().add_attribute("action", "instantiate"))
 }
@@ -93,7 +109,7 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::UpdateConfig(msg) => execute_update_config(deps, msg),
+        ExecuteMsg::UpdateConfig(msg) => execute_update_config(deps, info, msg),
         ExecuteMsg::CreateTask { task } => execute_create_task(deps, env, info, *task),
         ExecuteMsg::RemoveTask { task_hash } => execute_remove_task(deps, info, task_hash),
         // Methods for other contracts
@@ -103,15 +119,24 @@ pub fn execute(
         ExecuteMsg::RescheduleTask(reschedule_msg) => {
             execute_reschedule_task(deps, env, info, reschedule_msg)
         }
+        ExecuteMsg::PauseContract {} => execute_pause(deps, info),
+        ExecuteMsg::UnpauseContract {} => execute_unpause(deps, info),
     }
 }
 
-fn execute_update_config(deps: DepsMut, msg: UpdateConfigMsg) -> Result<Response, ContractError> {
+fn execute_update_config(
+    deps: DepsMut,
+    info: MessageInfo,
+    msg: UpdateConfigMsg,
+) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
+
+    if info.sender != config.owner_addr {
+        return Err(ContractError::Unauthorized {});
+    }
+
     // Destruct so we won't forget to update if if new fields added
     let UpdateConfigMsg {
-        paused,
-        owner_addr,
         croncat_factory_addr,
         croncat_manager_key,
         croncat_agents_key,
@@ -123,11 +148,8 @@ fn execute_update_config(deps: DepsMut, msg: UpdateConfigMsg) -> Result<Response
     } = msg;
 
     let new_config = Config {
-        paused: paused.unwrap_or(config.paused),
-        owner_addr: owner_addr
-            .map(|human| deps.api.addr_validate(&human))
-            .transpose()?
-            .unwrap_or(config.owner_addr),
+        owner_addr: config.owner_addr,
+        pause_admin: config.pause_admin,
         croncat_factory_addr: croncat_factory_addr
             .map(|human| deps.api.addr_validate(&human))
             .transpose()?
@@ -142,6 +164,10 @@ fn execute_update_config(deps: DepsMut, msg: UpdateConfigMsg) -> Result<Response
         gas_query_fee: gas_query_fee.unwrap_or(config.gas_query_fee),
         gas_limit: gas_limit.unwrap_or(config.gas_limit),
     };
+
+    // Ensure the new gas limit will work
+    validate_gas_limit(&new_config)?;
+    validate_non_zero_value(slot_granularity_time, "slot_granularity_time")?;
 
     CONFIG.save(deps.storage, &new_config)?;
     Ok(Response::new().add_attribute("action", "update_config"))
@@ -275,10 +301,10 @@ fn execute_remove_task(
     info: MessageInfo,
     task_hash: String,
 ) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-    if config.paused {
-        return Err(ContractError::Paused {});
+    if PAUSED.load(deps.storage)? {
+        return Err(ContractError::ContractPaused);
     }
+    let config = CONFIG.load(deps.storage)?;
     let hash = task_hash.as_bytes();
     if let Some(task) = tasks_map().may_load(deps.storage, hash)? {
         if task.owner_addr != info.sender {
@@ -310,10 +336,10 @@ fn execute_create_task(
     info: MessageInfo,
     task: TaskRequest,
 ) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-    if config.paused {
-        return Err(ContractError::Paused {});
+    if PAUSED.load(deps.storage)? {
+        return Err(ContractError::ContractPaused);
     }
+    let config = CONFIG.load(deps.storage)?;
     let owner_addr = info.sender;
 
     // Validate boundary and interval
@@ -434,10 +460,35 @@ fn execute_create_task(
         .add_message(agent_new_task_msg))
 }
 
+pub fn execute_pause(deps: DepsMut, info: MessageInfo) -> Result<Response, ContractError> {
+    if PAUSED.load(deps.storage)? {
+        return Err(ContractError::ContractPaused);
+    }
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.pause_admin {
+        return Err(ContractError::Unauthorized {});
+    }
+    PAUSED.save(deps.storage, &true)?;
+    Ok(Response::new().add_attribute("action", "pause_contract"))
+}
+
+pub fn execute_unpause(deps: DepsMut, info: MessageInfo) -> Result<Response, ContractError> {
+    if !PAUSED.load(deps.storage)? {
+        return Err(ContractError::ContractUnpaused);
+    }
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.owner_addr {
+        return Err(ContractError::Unauthorized {});
+    }
+    PAUSED.save(deps.storage, &false)?;
+    Ok(Response::new().add_attribute("action", "unpause_contract"))
+}
+
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&CONFIG.load(deps.storage)?),
+        QueryMsg::Paused {} => to_binary(&PAUSED.load(deps.storage)?),
         QueryMsg::TasksTotal {} => to_binary(&cosmwasm_std::Uint64::from(query_tasks_total(deps)?)),
         QueryMsg::CurrentTaskInfo {} => to_binary(&query_current_task_info(deps, env)?),
         QueryMsg::CurrentTask {} => to_binary(&query_current_task(deps, env)?),
@@ -564,6 +615,14 @@ fn query_slot_tasks_total(
 
 /// Get the slot with lowest height/timestamp
 /// NOTE: This prioritizes blocks over timestamps
+/// Why blocks over timestamps? Time-based tasks have a wider granularity than blocks.
+/// For example, the default configuration for time granularity is 10 seconds. This means
+/// on average a time-based task could occur on 1 of 2 blocks. This configuration is aimed
+/// at a larger window of time because timestamp guarantees are virtually impossible, without
+/// protocol level mechanisms. Since this is the case, timestamps should be considered more
+/// flexible in execution windows. Future versions of this contract can ensure better
+/// execution guarantees, based on whether the timestamp is nearing the end of its block-span
+/// window (timestamp end is closer to 2nd block than 1st).
 fn query_current_task(deps: Deps, env: Env) -> StdResult<TaskResponse> {
     let config = CONFIG.load(deps.storage)?;
     let mut block_slot: Vec<(u64, Vec<Vec<u8>>)> = BLOCK_SLOTS
@@ -627,8 +686,8 @@ fn query_evented_tasks(
     limit: Option<u64>,
 ) -> StdResult<Vec<TaskInfo>> {
     let config = CONFIG.load(deps.storage)?;
-    let from_index = from_index.unwrap_or_default();
-    let limit = limit.unwrap_or(100);
+    let from_index = from_index.unwrap_or(DEFAULT_PAGINATION_FROM_INDEX);
+    let limit = limit.unwrap_or(DEFAULT_PAGINATION_LIMIT);
     let tm = tasks_map();
 
     let mut evented_hashes: Vec<Vec<u8>> = Vec::new();
@@ -689,8 +748,8 @@ fn query_evented_ids(
     from_index: Option<u64>,
     limit: Option<u64>,
 ) -> StdResult<Vec<u64>> {
-    let from_index = from_index.unwrap_or_default();
-    let limit = limit.unwrap_or(100);
+    let from_index = from_index.unwrap_or(DEFAULT_PAGINATION_FROM_INDEX);
+    let limit = limit.unwrap_or(DEFAULT_PAGINATION_LIMIT);
 
     let evented_ids = EVENTED_TASKS_LOOKUP
         .keys(deps.storage, None, None, Order::Ascending)
@@ -708,8 +767,8 @@ fn query_evented_hashes(
     limit: Option<u64>,
 ) -> StdResult<Vec<String>> {
     let mut evented_hashes: Vec<Vec<u8>> = Vec::new();
-    let from_index = from_index.unwrap_or_default();
-    let limit = limit.unwrap_or(100);
+    let from_index = from_index.unwrap_or(DEFAULT_PAGINATION_FROM_INDEX);
+    let limit = limit.unwrap_or(DEFAULT_PAGINATION_LIMIT);
 
     // Check if slot was supplied, otherwise get the next slots for block and time
     if let Some(i) = id {
@@ -860,4 +919,29 @@ fn query_slot_ids(
         time_ids,
         block_ids,
     })
+}
+
+fn validate_non_zero_value(opt_num: Option<u64>, field_name: &str) -> Result<(), ContractError> {
+    if let Some(num) = opt_num {
+        if num == 0u64 {
+            Err(InvalidZeroValue {
+                field: field_name.to_string(),
+            })
+        } else {
+            Ok(())
+        }
+    } else {
+        Ok(())
+    }
+}
+
+/// Before changing the configuration's gas_limit, ensure it's a reasonable
+/// value, meaning higher than the sum of its needed parts
+fn validate_gas_limit(config: &Config) -> Result<(), ContractError> {
+    if config.gas_limit > config.gas_base_fee + config.gas_action_fee + config.gas_query_fee {
+        Ok(())
+    } else {
+        // Must be greater than those params
+        Err(ContractError::InvalidGas {})
+    }
 }

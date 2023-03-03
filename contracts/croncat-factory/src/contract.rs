@@ -1,13 +1,15 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
+use croncat_sdk_core::types::{DEFAULT_PAGINATION_FROM_INDEX, DEFAULT_PAGINATION_LIMIT};
+use cw_storage_plus::Item;
 
 use cosmwasm_std::{
     to_binary, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Order, Reply, Response, StdResult,
     Storage, SubMsg, WasmMsg,
 };
 use croncat_sdk_factory::msg::{
-    CheckIfConfigIsPaused, ContractMetadata, ContractMetadataInfo, ContractMetadataResponse,
-    EntryResponse, ModuleInstantiateInfo, VersionKind,
+    ContractMetadata, ContractMetadataInfo, ContractMetadataResponse, EntryResponse,
+    ModuleInstantiateInfo, VersionKind,
 };
 use cw2::set_contract_version;
 use cw_utils::parse_reply_instantiate_data;
@@ -16,7 +18,7 @@ use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{
     Config, TempReply, CONFIG, CONTRACT_ADDRS, CONTRACT_ADDRS_LOOKUP, CONTRACT_METADATAS,
-    LATEST_ADDRS, LATEST_VERSIONS, TEMP_REPLY,
+    LATEST_ADDRS, LATEST_VERSIONS, MAX_URL_LENGTH, TEMP_REPLY,
 };
 
 // version info for migration info
@@ -75,7 +77,13 @@ pub fn instantiate(
         .map(|human| deps.api.addr_validate(&human))
         .transpose()?
         .unwrap_or_else(|| info.sender.clone());
-    CONFIG.save(deps.storage, &Config { owner_addr })?;
+    CONFIG.save(
+        deps.storage,
+        &Config {
+            owner_addr,
+            nominated_owner_addr: None,
+        },
+    )?;
 
     Ok(Response::new().add_attribute("action", "instantiate"))
 }
@@ -87,15 +95,19 @@ pub fn execute(
     info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
-    // Any factory action should be done by the owner_addr
+    // All factory actions can only be done by the owner_addr
     let config = CONFIG.load(deps.storage)?;
-    if config.owner_addr != info.sender {
+    let is_accept_owner_msg = match msg {
+        // Only this method allowed, since we are transitioning to a new owner IF the signer is nominated
+        ExecuteMsg::AcceptNominateOwner {} => true,
+        _ => false,
+    };
+    if config.owner_addr != info.sender && !is_accept_owner_msg {
         return Err(ContractError::Unauthorized {});
     }
 
     match msg {
-        ExecuteMsg::UpdateConfig { owner_addr } => execute_update_config(deps, owner_addr),
-        ExecuteMsg::Proxy { msg } => execute_proxy(deps, info, msg),
+        ExecuteMsg::Proxy { msg } => execute_proxy(deps, msg),
         ExecuteMsg::Deploy {
             kind,
             module_instantiate_info,
@@ -110,29 +122,15 @@ pub fn execute(
             changelog_url,
             schema,
         } => execute_update_metadata(deps, contract_name, version, changelog_url, schema),
+        ExecuteMsg::NominateOwner {
+            nominated_owner_addr,
+        } => execute_nominate_owner(deps, nominated_owner_addr),
+        ExecuteMsg::AcceptNominateOwner {} => execute_accept_nominate_owner(deps, info),
+        ExecuteMsg::RemoveNominateOwner {} => execute_remove_nominate_owner(deps),
     }
 }
 
-fn execute_update_config(deps: DepsMut, owner_addr: String) -> Result<Response, ContractError> {
-    let config = Config {
-        owner_addr: deps.api.addr_validate(&owner_addr)?,
-    };
-    CONFIG.save(deps.storage, &config)?;
-    Ok(Response::new().add_attribute("action", "update_config"))
-}
-
-fn execute_proxy(
-    deps: DepsMut,
-    info: MessageInfo,
-    msg: WasmMsg,
-) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-
-    // Only allow owner to relay msgs
-    if config.owner_addr != info.sender {
-        return Err(ContractError::Unauthorized {});
-    }
-
+fn execute_proxy(deps: DepsMut, msg: WasmMsg) -> Result<Response, ContractError> {
     // Only accept WasmMsg::Execute
     let contract_addr = match &msg {
         WasmMsg::Execute {
@@ -163,6 +161,9 @@ fn execute_update_metadata(
     new_changelog: Option<String>,
     schema: Option<String>,
 ) -> Result<Response, ContractError> {
+    // Validate new_changelog
+    check_changelog_length(&new_changelog)?;
+
     CONTRACT_METADATAS.update(deps.storage, (&contract_name, &version), |metadata_res| {
         match metadata_res {
             Some(mut metadata) => {
@@ -202,10 +203,10 @@ fn execute_remove(
     if metadata.kind != VersionKind::Library {
         let contract_addr = CONTRACT_ADDRS.load(deps.storage, (&contract_name, &version))?;
 
-        let config: CheckIfConfigIsPaused = deps
-            .querier
-            .query_wasm_smart(contract_addr, &QueryMsg::Config {})?;
-        if !config.paused {
+        // Check contract pause state, by direct state key
+        let pause_state: Item<bool> = Item::new("paused");
+        let paused: bool = pause_state.query(&deps.querier, contract_addr)?;
+        if !paused {
             return Err(ContractError::NotPaused {});
         }
     }
@@ -224,6 +225,19 @@ fn execute_deploy(
     kind: VersionKind,
     module_instantiate_info: ModuleInstantiateInfo,
 ) -> Result<Response, ContractError> {
+    // Validate changelog_url
+    check_changelog_length(&module_instantiate_info.changelog_url)?;
+
+    if CONTRACT_METADATAS.has(
+        deps.storage,
+        (
+            module_instantiate_info.contract_name.as_str(),
+            &module_instantiate_info.version.clone(),
+        ),
+    ) {
+        return Err(ContractError::VersionExists {});
+    }
+
     let contract_name = module_instantiate_info.contract_name.clone();
     let wasm = init_save_metadata_generate_wasm_msg(
         deps.storage,
@@ -242,6 +256,63 @@ fn execute_deploy(
         .add_attribute("action", "deploy")
         .add_attribute("contract_name", temp_reply.contract_name)
         .add_submessage(msg))
+}
+
+/// Proposes a new owner account, can only be transfered if proposed account accepts
+fn execute_nominate_owner(
+    deps: DepsMut,
+    nominated_owner_addr: String,
+) -> Result<Response, ContractError> {
+    let c = CONFIG.load(deps.storage)?;
+    // Nomination shouldn't be current owner
+    if c.owner_addr == nominated_owner_addr {
+        return Err(ContractError::SameOwnerNominated {});
+    }
+    let config = Config {
+        owner_addr: c.owner_addr,
+        nominated_owner_addr: Some(deps.api.addr_validate(&nominated_owner_addr)?),
+    };
+    CONFIG.save(deps.storage, &config)?;
+    Ok(Response::new().add_attribute("action", "nominate_owner"))
+}
+
+/// Nominated account accepts proposal for ownership transfer
+fn execute_accept_nominate_owner(
+    deps: DepsMut,
+    info: MessageInfo,
+) -> Result<Response, ContractError> {
+    let c = CONFIG.load(deps.storage)?;
+    // Nomination shouldn't get accepted from current owner
+    if c.owner_addr == info.sender {
+        return Err(ContractError::Unauthorized {});
+    }
+    // Nomination signer should match current nomination
+    if let Some(nominated_addr) = c.nominated_owner_addr {
+        let nominated = deps.api.addr_validate(nominated_addr.as_str())?;
+        if nominated != info.sender {
+            return Err(ContractError::Unauthorized {});
+        }
+        let config = Config {
+            // make the transfer
+            owner_addr: nominated,
+            nominated_owner_addr: None,
+        };
+        CONFIG.save(deps.storage, &config)?;
+    } else {
+        return Err(ContractError::Unauthorized {});
+    };
+    Ok(Response::new().add_attribute("action", "accept_nominate_owner"))
+}
+
+/// Current owner removes a valid nomination
+fn execute_remove_nominate_owner(deps: DepsMut) -> Result<Response, ContractError> {
+    let c = CONFIG.load(deps.storage)?;
+    let config = Config {
+        owner_addr: c.owner_addr,
+        nominated_owner_addr: None,
+    };
+    CONFIG.save(deps.storage, &config)?;
+    Ok(Response::new().add_attribute("action", "remove_nominate_owner"))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -276,8 +347,8 @@ fn query_all_entries(
     from_index: Option<u64>,
     limit: Option<u64>,
 ) -> StdResult<Vec<EntryResponse>> {
-    let from_index = from_index.unwrap_or_default();
-    let limit = limit.unwrap_or(100);
+    let from_index = from_index.unwrap_or(DEFAULT_PAGINATION_FROM_INDEX);
+    let limit = limit.unwrap_or(DEFAULT_PAGINATION_LIMIT);
     let metadatas: Vec<((String, Vec<u8>), ContractMetadata)> = CONTRACT_METADATAS
         .range(deps.storage, None, None, Order::Ascending)
         .skip(from_index as usize)
@@ -311,8 +382,8 @@ fn query_contract_names(
     from_index: Option<u64>,
     limit: Option<u64>,
 ) -> StdResult<Vec<String>> {
-    let from_index = from_index.unwrap_or_default();
-    let limit = limit.unwrap_or(100);
+    let from_index = from_index.unwrap_or(DEFAULT_PAGINATION_FROM_INDEX);
+    let limit = limit.unwrap_or(DEFAULT_PAGINATION_LIMIT);
     CONTRACT_ADDRS
         .keys(deps.storage, None, None, Order::Ascending)
         .skip(from_index as usize)
@@ -327,8 +398,8 @@ fn query_versions_by_contract_name(
     from_index: Option<u64>,
     limit: Option<u64>,
 ) -> StdResult<Vec<ContractMetadataInfo>> {
-    let from_index = from_index.unwrap_or_default();
-    let limit = limit.unwrap_or(100);
+    let from_index = from_index.unwrap_or(DEFAULT_PAGINATION_FROM_INDEX);
+    let limit = limit.unwrap_or(DEFAULT_PAGINATION_LIMIT);
     let metadatas: Vec<(Vec<u8>, ContractMetadata)> = CONTRACT_METADATAS
         .prefix(&contract_name)
         .range(deps.storage, None, None, Order::Ascending)
@@ -425,4 +496,16 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractE
     CONTRACT_ADDRS_LOOKUP.save(deps.storage, contract_address, &contract_name)?;
 
     Ok(Response::new())
+}
+
+fn check_changelog_length(changelog_url: &Option<String>) -> Result<(), ContractError> {
+    if let Some(url) = changelog_url {
+        if url.len() > MAX_URL_LENGTH as usize {
+            Err(ContractError::UrlExceededMaxLength {})
+        } else {
+            Ok(())
+        }
+    } else {
+        Ok(())
+    }
 }

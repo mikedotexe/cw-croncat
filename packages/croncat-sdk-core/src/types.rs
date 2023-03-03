@@ -2,11 +2,75 @@ use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Coin, StdResult, Uint128};
 use cw20::Cw20CoinVerified;
 
+use crate::error::SdkError;
+
+/// from_index: Start at the 0 index for retrieving data, unless specified for pagination
+pub const DEFAULT_PAGINATION_FROM_INDEX: u64 = 0;
+/// limit: will grab a total set of records or the maximum allowed.
+pub const DEFAULT_PAGINATION_LIMIT: u64 = 100;
+
+use self::gas_price_defaults::{
+    GAS_ADJUSTMENT_NUMERATOR_DEFAULT, GAS_DENOMINATOR, GAS_NUMERATOR_DEFAULT,
+};
+
+pub mod gas_price_defaults {
+    pub const GAS_NUMERATOR_DEFAULT: u64 = 4;
+    pub const GAS_ADJUSTMENT_NUMERATOR_DEFAULT: u64 = 150;
+    pub const GAS_DENOMINATOR: u64 = 100;
+}
+
+/// We can't store gas_price as floats inside cosmwasm
+/// so instead of having 0.04 we use GasPrice {4/100}
+/// and after that multiply Gas by `gas_adjustment` {150/100} (1.5)
+#[cw_serde]
+pub struct GasPrice {
+    pub numerator: u64,
+    /// Denominator is shared
+    pub denominator: u64,
+    pub gas_adjustment_numerator: u64,
+}
+
+impl GasPrice {
+    pub fn is_valid(&self) -> bool {
+        self.denominator != 0 && self.numerator != 0 && self.gas_adjustment_numerator != 0
+    }
+
+    pub fn calculate(&self, gas_amount: u64) -> Result<u128, SdkError> {
+        let gas_adjusted = gas_amount
+            .checked_mul(self.gas_adjustment_numerator)
+            .and_then(|g| g.checked_div(self.denominator))
+            .ok_or(SdkError::InvalidGas {})?;
+
+        let price = gas_adjusted
+            .checked_mul(self.numerator)
+            .and_then(|g| g.checked_div(self.denominator))
+            .ok_or(SdkError::InvalidGas {})?;
+
+        Ok(price as u128)
+    }
+}
+
+impl Default for GasPrice {
+    fn default() -> Self {
+        Self {
+            numerator: GAS_NUMERATOR_DEFAULT,
+            denominator: GAS_DENOMINATOR,
+            gas_adjustment_numerator: GAS_ADJUSTMENT_NUMERATOR_DEFAULT,
+        }
+    }
+}
+
 #[cw_serde]
 pub struct AmountForOneTask {
-    pub gas: u64,
+    // Attached balances, used for forwarding during actions
     pub cw20: Option<Cw20CoinVerified>,
     pub coin: [Option<Coin>; 2],
+
+    // to stabilize deposited fees against point-in-time configured fees
+    pub gas: u64,
+    pub agent_fee: u16,
+    pub treasury_fee: u16,
+    pub gas_price: GasPrice,
 }
 
 impl AmountForOneTask {

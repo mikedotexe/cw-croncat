@@ -18,11 +18,17 @@ pub enum ContractError {
     #[error("Agent is not active")]
     AgentNotActive,
 
-    #[error("Insufficient funds. Needing {amount_needed:?}")]
+    #[error("Agent is not in pending set")]
+    AgentNotPending,
+
+    #[error("Insufficient funds. Need a balance of at least {amount_needed:?} to cover the first few task chain fees")]
     InsufficientFunds { amount_needed: Coin },
 
     #[error("Contract is in paused state")]
     ContractPaused,
+
+    #[error("Contract is in unpaused state")]
+    ContractUnpaused,
 
     #[error("Try again later for nomination")]
     TryLaterForNomination,
@@ -32,6 +38,9 @@ pub enum ContractError {
 
     #[error("Unauthorized function call")]
     Unauthorized,
+
+    #[error("Invalid Pause Admin")]
+    InvalidPauseAdmin,
 
     #[error("No active agents in active agent list")]
     NoActiveAgents,
@@ -56,4 +65,7 @@ pub enum ContractError {
 
     #[error("No rewards available for withdraw")]
     NoWithdrawRewardsAvailable {},
+
+    #[error("Invalid configuration value for: {field}")]
+    InvalidConfigurationValue { field: String },
 }

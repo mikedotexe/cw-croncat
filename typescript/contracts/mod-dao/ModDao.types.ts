@@ -13,10 +13,14 @@ export type QueryMsg = {
 } | {
   has_passed_proposals: {
     dao_address: string;
+    limit?: number | null;
+    start_after?: number | null;
   };
 } | {
   has_passed_proposal_with_migration: {
     dao_address: string;
+    limit?: number | null;
+    start_after?: number | null;
   };
 } | {
   has_proposals_gt_id: {

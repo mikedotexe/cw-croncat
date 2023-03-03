@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 
 use self::dao::Status;
 
+/// from_index: Start at the 0 index for retrieving data, unless specified for pagination
+pub const DEFAULT_PAGINATION_FROM_INDEX: u64 = 0;
+/// limit: will grab a total set of records or the maximum allowed.
+/// 1000 because gas estimates inside DAODAO repo revealed ~4000 was gas upper limit, so we use conservative amount.
+pub const DEFAULT_PAGINATION_LIMIT: u64 = 1000;
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
 pub struct ProposalStatusMatches {
     pub dao_address: String,

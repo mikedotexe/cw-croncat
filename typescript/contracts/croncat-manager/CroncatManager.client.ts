@@ -6,10 +6,11 @@
 
 import { CosmWasmClient, SigningCosmWasmClient, ExecuteResult } from "@cosmjs/cosmwasm-stargate";
 import { StdFee } from "@cosmjs/amino";
-import { InstantiateMsg, GasPrice, ExecuteMsg, Uint128, Binary, Addr, UpdateConfig, Cw20Coin, Cw20ReceiveMsg, ManagerCreateTaskBalance, AmountForOneTask, Coin, Cw20CoinVerified, ManagerRemoveTask, AgentWithdrawOnRemovalArgs, QueryMsg, Config, TaskBalanceResponse, TaskBalance, ArrayOfCw20CoinVerified } from "./CroncatManager.types";
+import { Addr, InstantiateMsg, GasPrice, ExecuteMsg, Uint128, Binary, UpdateConfig, Cw20Coin, Cw20ReceiveMsg, ManagerCreateTaskBalance, AmountForOneTask, Coin, Cw20CoinVerified, ManagerRemoveTask, AgentWithdrawOnRemovalArgs, QueryMsg, Config, Boolean, TaskBalanceResponse, TaskBalance, ArrayOfCw20CoinVerified } from "./CroncatManager.types";
 export interface CroncatManagerReadOnlyInterface {
   contractAddress: string;
   config: () => Promise<Config>;
+  paused: () => Promise<Boolean>;
   treasuryBalance: () => Promise<Uint128>;
   usersBalances: ({
     address,
@@ -39,6 +40,7 @@ export class CroncatManagerQueryClient implements CroncatManagerReadOnlyInterfac
     this.client = client;
     this.contractAddress = contractAddress;
     this.config = this.config.bind(this);
+    this.paused = this.paused.bind(this);
     this.treasuryBalance = this.treasuryBalance.bind(this);
     this.usersBalances = this.usersBalances.bind(this);
     this.taskBalance = this.taskBalance.bind(this);
@@ -48,6 +50,11 @@ export class CroncatManagerQueryClient implements CroncatManagerReadOnlyInterfac
   config = async (): Promise<Config> => {
     return this.client.queryContractSmart(this.contractAddress, {
       config: {}
+    });
+  };
+  paused = async (): Promise<Boolean> => {
+    return this.client.queryContractSmart(this.contractAddress, {
+      paused: {}
     });
   };
   treasuryBalance = async (): Promise<Uint128> => {
@@ -104,8 +111,6 @@ export interface CroncatManagerInterface extends CroncatManagerReadOnlyInterface
     croncatTasksKey,
     cw20Whitelist,
     gasPrice,
-    ownerAddr,
-    paused,
     treasuryAddr,
     treasuryFee
   }: {
@@ -114,8 +119,6 @@ export interface CroncatManagerInterface extends CroncatManagerReadOnlyInterface
     croncatTasksKey?: string[][];
     cw20Whitelist?: string[];
     gasPrice?: GasPrice;
-    ownerAddr?: string;
-    paused?: boolean;
     treasuryAddr?: string;
     treasuryFee?: number;
   }, fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
@@ -172,6 +175,8 @@ export interface CroncatManagerInterface extends CroncatManagerReadOnlyInterface
     limit?: number;
   }, fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
   agentWithdraw: (fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
+  pauseContract: (fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
+  unpauseContract: (fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
 }
 export class CroncatManagerClient extends CroncatManagerQueryClient implements CroncatManagerInterface {
   client: SigningCosmWasmClient;
@@ -193,6 +198,8 @@ export class CroncatManagerClient extends CroncatManagerQueryClient implements C
     this.ownerWithdraw = this.ownerWithdraw.bind(this);
     this.userWithdraw = this.userWithdraw.bind(this);
     this.agentWithdraw = this.agentWithdraw.bind(this);
+    this.pauseContract = this.pauseContract.bind(this);
+    this.unpauseContract = this.unpauseContract.bind(this);
   }
 
   updateConfig = async ({
@@ -201,8 +208,6 @@ export class CroncatManagerClient extends CroncatManagerQueryClient implements C
     croncatTasksKey,
     cw20Whitelist,
     gasPrice,
-    ownerAddr,
-    paused,
     treasuryAddr,
     treasuryFee
   }: {
@@ -211,8 +216,6 @@ export class CroncatManagerClient extends CroncatManagerQueryClient implements C
     croncatTasksKey?: string[][];
     cw20Whitelist?: string[];
     gasPrice?: GasPrice;
-    ownerAddr?: string;
-    paused?: boolean;
     treasuryAddr?: string;
     treasuryFee?: number;
   }, fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
@@ -223,8 +226,6 @@ export class CroncatManagerClient extends CroncatManagerQueryClient implements C
         croncat_tasks_key: croncatTasksKey,
         cw20_whitelist: cw20Whitelist,
         gas_price: gasPrice,
-        owner_addr: ownerAddr,
-        paused,
         treasury_addr: treasuryAddr,
         treasury_fee: treasuryFee
       }
@@ -339,6 +340,16 @@ export class CroncatManagerClient extends CroncatManagerQueryClient implements C
   agentWithdraw = async (fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
     return await this.client.execute(this.sender, this.contractAddress, {
       agent_withdraw: {}
+    }, fee, memo, funds);
+  };
+  pauseContract = async (fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
+    return await this.client.execute(this.sender, this.contractAddress, {
+      pause_contract: {}
+    }, fee, memo, funds);
+  };
+  unpauseContract = async (fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
+    return await this.client.execute(this.sender, this.contractAddress, {
+      unpause_contract: {}
     }, fee, memo, funds);
   };
 }

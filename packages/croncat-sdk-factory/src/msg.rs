@@ -1,16 +1,22 @@
 use std::fmt;
 
-use cosmwasm_schema::{cw_serde, serde::Deserialize, QueryResponses};
+use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{Addr, Binary, WasmMsg};
 
 #[cw_serde]
 pub struct Config {
+    /// The owner of the Factory, the DAO responsible for all changes & usage
+    /// All Execute methods are restricted to this address, the CronCat DAO
     pub owner_addr: Addr,
+    /// Default empty, nominated owners must accept the nomination for ownership
+    /// transfer to be safely completed.
+    pub nominated_owner_addr: Option<Addr>,
 }
 
 #[cw_serde]
 pub struct FactoryInstantiateMsg {
-    /// Owner address of the contract
+    /// Owner address of the contract,
+    /// CronCat DAO will be the owner since it deploys the factory
     /// Only owner can execute messages in this contract
     /// If no owner_addr is passed sender will be used as owner address
     pub owner_addr: Option<String>,
@@ -18,11 +24,6 @@ pub struct FactoryInstantiateMsg {
 
 #[cw_serde]
 pub enum FactoryExecuteMsg {
-    /// Updates the factory config
-    UpdateConfig {
-        owner_addr: String,
-    },
-
     /// Deploys contract and saves metadata of the contract to the factory
     Deploy {
         kind: VersionKind,
@@ -44,9 +45,18 @@ pub enum FactoryExecuteMsg {
         schema: Option<String>,
     },
 
-    Proxy {
-        msg: WasmMsg,
-    },
+    /// Pass through execution for versioned contract calls
+    Proxy { msg: WasmMsg },
+
+    /// Factory owner (DAO) may submit a new owner to transfer ownership
+    NominateOwner { nominated_owner_addr: String },
+
+    /// The nominated address must accept a nomination to finalize transfer of ownership
+    /// NOTE: This is the only method that can be called, that isn't from current owner_addr
+    AcceptNominateOwner {},
+
+    /// Factory owner (DAO) may revoke any/all ownership nominations at any time.
+    RemoveNominateOwner {},
 }
 
 #[cw_serde]
@@ -188,11 +198,4 @@ pub enum Admin {
     Address { addr: String },
     /// Sets the admin as the core module address.
     CoreModule {},
-}
-
-/// Universal config struct for removal of non-library contract
-#[derive(Deserialize)]
-#[serde(crate = "cosmwasm_schema::serde")]
-pub struct CheckIfConfigIsPaused {
-    pub paused: bool,
 }

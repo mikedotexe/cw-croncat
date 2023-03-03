@@ -2,13 +2,14 @@ use cosmwasm_std::{
     coins, from_binary, to_binary, Addr, BankMsg, Deps, DepsMut, MessageInfo, Order, Response,
     StdError, StdResult, Storage, Uint128, WasmMsg,
 };
-use croncat_sdk_manager::types::{Config, GasPrice};
+use croncat_sdk_core::types::GasPrice;
+use croncat_sdk_manager::types::Config;
 use cw20::{Cw20Coin, Cw20CoinVerified, Cw20ExecuteMsg, Cw20ReceiveMsg};
 
 use crate::{
     helpers::{check_if_sender_is_task_owner, check_ready_for_execution, gas_fee, get_tasks_addr},
     msg::ReceiveMsg,
-    state::{AGENT_REWARDS, CONFIG, TASKS_BALANCES, TEMP_BALANCES_CW20, TREASURY_BALANCE},
+    state::{AGENT_REWARDS, CONFIG, PAUSED, TASKS_BALANCES, TEMP_BALANCES_CW20, TREASURY_BALANCE},
     ContractError,
 };
 
@@ -58,25 +59,33 @@ pub(crate) fn add_fee_rewards(
     gas: u64,
     gas_price: &GasPrice,
     agent_addr: &Addr,
-    agent_fee: u64,
-    treasury_fee: u64,
+    agent_fee: u16,
+    treasury_fee: u16,
+    reimburse_only: bool,
 ) -> Result<(), ContractError> {
     AGENT_REWARDS.update(
         storage,
         agent_addr,
         |agent_balance| -> Result<_, ContractError> {
             // Adding base gas and agent_fee here
-            let gas_fee = gas_fee(gas, agent_fee)? + gas;
-            let amount: Uint128 = gas_price.calculate(gas_fee)?.into();
-            Ok(agent_balance.unwrap_or_default() + amount)
+            let gas_fee = if reimburse_only {
+                gas
+            } else {
+                gas_fee(gas, agent_fee.into())? + gas
+            };
+            let amount: Uint128 = gas_price.calculate(gas_fee).unwrap().into();
+            Ok(agent_balance.unwrap_or_default().saturating_add(amount))
         },
     )?;
 
-    TREASURY_BALANCE.update(storage, |balance| -> Result<_, ContractError> {
-        let gas_fee = gas_fee(gas, treasury_fee)?;
-        let amount: Uint128 = gas_price.calculate(gas_fee)?.into();
-        Ok(balance + amount)
-    })?;
+    if !reimburse_only {
+        TREASURY_BALANCE.update(storage, |balance| -> Result<_, ContractError> {
+            let gas_fee = gas_fee(gas, treasury_fee.into())?;
+            let amount: Uint128 = gas_price.calculate(gas_fee).unwrap().into();
+            Ok(balance.saturating_add(amount))
+        })?;
+    }
+
     Ok(())
 }
 
@@ -93,8 +102,9 @@ pub fn execute_receive_cw20(
     wrapper: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
     let msg: ReceiveMsg = from_binary(&wrapper.msg)?;
+    let paused = PAUSED.load(deps.storage)?;
+    check_ready_for_execution(&info, paused)?;
     let config = CONFIG.load(deps.storage)?;
-    check_ready_for_execution(&info, &config)?;
 
     let sender = deps.api.addr_validate(&wrapper.sender)?;
     let coin_addr = info.sender;
@@ -125,9 +135,9 @@ pub fn execute_receive_cw20(
                 .ok_or(ContractError::NoTaskHash {})?;
             let mut balance = task_balances
                 .cw20_balance
-                .ok_or(ContractError::TooManyCoins {})?;
+                .ok_or(ContractError::InvalidAttachedCoins {})?;
             if balance.address != cw20_verified.address {
-                return Err(ContractError::TooManyCoins {});
+                return Err(ContractError::InvalidAttachedCoins {});
             }
             balance.amount += cw20_verified.amount;
             task_balances.cw20_balance = Some(balance);
@@ -149,8 +159,9 @@ pub fn execute_refill_task_cw20(
     task_hash: String,
     cw20: Cw20Coin,
 ) -> Result<Response, ContractError> {
+    let paused = PAUSED.load(deps.storage)?;
+    check_ready_for_execution(&info, paused)?;
     let config = CONFIG.load(deps.storage)?;
-    check_ready_for_execution(&info, &config)?;
 
     // check if sender is task owner
     let tasks_addr = get_tasks_addr(&deps.querier, &config)?;
@@ -167,9 +178,9 @@ pub fn execute_refill_task_cw20(
         .ok_or(ContractError::NoTaskHash {})?;
     let mut balance = task_balances
         .cw20_balance
-        .ok_or(ContractError::TooManyCoins {})?;
+        .ok_or(ContractError::InvalidAttachedCoins {})?;
     if balance.address != cw20_verified.address {
-        return Err(ContractError::TooManyCoins {});
+        return Err(ContractError::InvalidAttachedCoins {});
     }
     balance.amount += cw20_verified.amount;
     task_balances.cw20_balance = Some(balance);
@@ -188,13 +199,21 @@ pub fn execute_refill_task_cw20(
 /// Used by users to withdraw back their cw20 tokens
 ///
 /// Returns updated balances
+///
+/// NOTE: During paused configuration, all funds will be temporarily locked.
+/// This is currently to safeguard all execution paths. All funds (not just user funds)
+/// are locked, until any pause concern has been addressed or finished. In many cases,
+/// this will occur for simple contract upgrades, but could be caused from DAO identified
+/// security risks. The pause-lock will be removed as future contract testing proves
+/// mature enough, deemed ready by DAO. We expect this to be several months post-launch.
 pub fn execute_user_withdraw(
     deps: DepsMut,
     info: MessageInfo,
     limit: Option<u64>,
 ) -> Result<Response, ContractError> {
+    let paused = PAUSED.load(deps.storage)?;
+    check_ready_for_execution(&info, paused)?;
     let config = CONFIG.load(deps.storage)?;
-    check_ready_for_execution(&info, &config)?;
     let limit = limit.unwrap_or(config.limit);
     let user_addr = info.sender;
     let withdraws: Vec<Cw20CoinVerified> = TEMP_BALANCES_CW20
@@ -261,10 +280,10 @@ pub fn execute_refill_native_balance(
     info: MessageInfo,
     task_hash: String,
 ) -> Result<Response, ContractError> {
-    let config: Config = CONFIG.load(deps.storage)?;
-    if config.paused {
-        return Err(ContractError::Paused {});
+    if PAUSED.load(deps.storage)? {
+        return Err(ContractError::ContractPaused {});
     }
+    let config: Config = CONFIG.load(deps.storage)?;
     // Check if sender is task owner
     let tasks_addr = get_tasks_addr(&deps.querier, &config)?;
     check_if_sender_is_task_owner(&deps.querier, &tasks_addr, &info.sender, &task_hash)?;
@@ -274,7 +293,7 @@ pub fn execute_refill_native_balance(
         .ok_or(ContractError::NoTaskHash {})?;
 
     if info.funds.len() > 2 {
-        return Err(ContractError::TooManyCoins {});
+        return Err(ContractError::InvalidAttachedCoins {});
     }
     for coin in info.funds {
         if coin.denom == config.native_denom {
@@ -282,9 +301,9 @@ pub fn execute_refill_native_balance(
         } else {
             let mut ibc = task_balances
                 .ibc_balance
-                .ok_or(ContractError::TooManyCoins {})?;
+                .ok_or(ContractError::InvalidAttachedCoins {})?;
             if ibc.denom != coin.denom {
-                return Err(ContractError::TooManyCoins {});
+                return Err(ContractError::InvalidAttachedCoins {});
             }
             ibc.amount += coin.amount;
             task_balances.ibc_balance = Some(ibc);
