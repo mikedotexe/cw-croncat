@@ -5360,7 +5360,7 @@ fn not_allowing_to_execute_any_task() {
         .unwrap_err()
         .downcast()
         .unwrap();
-    assert_eq!(res, ContractError::NoTask {});
+    assert_eq!(res, ContractError::NoTaskForAgent {});
 
     // not evented task, without queries
     let task = croncat_sdk_tasks::types::TaskRequest {
@@ -5403,5 +5403,5 @@ fn not_allowing_to_execute_any_task() {
         .unwrap_err()
         .downcast()
         .unwrap();
-    assert_eq!(res, ContractError::NoTask {});
+    assert_eq!(res, ContractError::NoTaskForAgent {});
 }

@@ -11,6 +11,9 @@ pub enum ContractError {
     #[error("{0}")]
     Sdk(#[from] SdkError),
 
+    #[error("{0}")]
+    SdkCore(#[from] croncat_sdk_core::error::SdkError),
+
     #[error(transparent)]
     ParseReplyError(#[from] ParseReplyError),
 

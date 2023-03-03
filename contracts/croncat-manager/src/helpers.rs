@@ -609,7 +609,7 @@ pub fn queries_transforms_fallback(
 ) -> Result<Response, ContractError> {
     let gas_with_fees = gas_with_fees(
         task.amount_for_one_task.gas,
-        config.agent_fee + config.treasury_fee,
+        (config.agent_fee + config.treasury_fee) as u64,
     )?;
     let native_for_gas_required = config.gas_price.calculate(gas_with_fees)?;
     let mut task_balance = TASKS_BALANCES.load(deps.storage, task.task_hash.as_bytes())?;
@@ -626,6 +626,7 @@ pub fn queries_transforms_fallback(
         &agent_addr,
         config.agent_fee,
         config.treasury_fee,
+        false,
     )?;
 
     if task.stop_on_fail || task.interval == Interval::Once {
