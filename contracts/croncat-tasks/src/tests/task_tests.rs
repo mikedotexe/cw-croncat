@@ -2726,7 +2726,7 @@ fn query_slot_hashes_test() {
         hashes,
         SlotHashesResponse {
             block_id: current_block.u64() + 1,
-            block_task_hash: vec![block_task_hash2, block_task_hash1],
+            block_task_hash: vec![block_task_hash1, block_task_hash2],
             time_id: 1_571_797_420_000_000_000,
             time_task_hash: vec![time_task_hash1]
         }
