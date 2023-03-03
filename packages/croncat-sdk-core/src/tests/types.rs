@@ -1,14 +1,26 @@
 use cosmwasm_std::{coin, Addr};
 use cw20::Cw20CoinVerified;
 
-use crate::types::AmountForOneTask;
+use crate::error::SdkError;
+use crate::types::{AmountForOneTask, GasPrice};
+
+#[test]
+fn failed_gas_calculations() {
+    let gas_price_wrapper = GasPrice::default();
+
+    let err = gas_price_wrapper.calculate(u64::MAX).unwrap_err();
+    assert!(matches!(err, SdkError::InvalidGas {}));
+}
 
 #[test]
 fn amount_for_one_task_add_gas() {
     let mut amount = AmountForOneTask {
-        gas: 0,
         cw20: None,
         coin: [None, None],
+        gas: 0,
+        agent_fee: u16::default(),
+        treasury_fee: u16::default(),
+        gas_price: GasPrice::default(),
     };
 
     amount.add_gas(10);
@@ -24,9 +36,12 @@ fn amount_for_one_task_add_gas() {
 #[test]
 fn amount_for_one_task_add_coin() {
     let mut amount = AmountForOneTask {
-        gas: 0,
         cw20: None,
         coin: [None, None],
+        gas: 0,
+        agent_fee: u16::default(),
+        treasury_fee: u16::default(),
+        gas_price: GasPrice::default(),
     };
 
     // Add the first coin
@@ -73,9 +88,12 @@ fn amount_for_one_task_add_coin() {
 #[test]
 fn amount_for_one_task_add_cw20() {
     let mut amount = AmountForOneTask {
-        gas: 0,
         cw20: None,
         coin: [None, None],
+        gas: 0,
+        agent_fee: u16::default(),
+        treasury_fee: u16::default(),
+        gas_price: GasPrice::default(),
     };
 
     // Add cw20 coin
@@ -118,9 +136,12 @@ fn amount_for_one_task_add_cw20() {
 #[test]
 fn amount_for_one_task_sub_coin() {
     let mut amount = AmountForOneTask {
-        gas: 0,
         cw20: None,
         coin: [None, None],
+        gas: 0,
+        agent_fee: u16::default(),
+        treasury_fee: u16::default(),
+        gas_price: GasPrice::default(),
     };
 
     let coin1 = coin(10, "denom1".to_string());
@@ -128,9 +149,12 @@ fn amount_for_one_task_sub_coin() {
     assert_eq!(
         amount,
         AmountForOneTask {
-            gas: 0,
             cw20: None,
             coin: [None, None],
+            gas: 0,
+            agent_fee: u16::default(),
+            treasury_fee: u16::default(),
+            gas_price: GasPrice::default(),
         }
     );
 
@@ -203,9 +227,12 @@ fn amount_for_one_task_sub_coin() {
 #[test]
 fn amount_for_one_task_sub_cw20() {
     let mut amount = AmountForOneTask {
-        gas: 0,
         cw20: None,
         coin: [None, None],
+        gas: 0,
+        agent_fee: u16::default(),
+        treasury_fee: u16::default(),
+        gas_price: GasPrice::default(),
     };
 
     let cw20 = Cw20CoinVerified {

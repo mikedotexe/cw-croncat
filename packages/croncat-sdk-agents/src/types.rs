@@ -64,8 +64,10 @@ pub struct Config {
     pub croncat_tasks_key: (String, [u8; 2]),
     /// Contract owner address
     pub owner_addr: Addr,
-    /// If contract was paused/unpaused
-    pub paused: bool,
+    /// A multisig admin whose sole responsibility is to pause the contract in event of emergency.
+    /// Must be a different contract address than DAO, cannot be a regular keypair
+    /// Does not have the ability to unpause, must rely on the DAO to assess the situation and act accordingly
+    pub pause_admin: Addr,
     /// Agent management
     /// The minimum number of tasks per agent
     /// Example: 10

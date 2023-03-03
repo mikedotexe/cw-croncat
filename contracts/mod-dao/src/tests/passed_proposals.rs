@@ -137,6 +137,8 @@ fn test_single_check_passed_proposals() {
             contract_addr.clone(),
             &QueryMsg::HasPassedProposals {
                 dao_address: govmod_single.to_string(),
+                start_after: Some(0u64),
+                limit: Some(101),
             },
         )
         .unwrap();
@@ -168,6 +170,8 @@ fn test_single_check_passed_proposals() {
                 contract_addr.clone(),
                 &QueryMsg::HasPassedProposals {
                     dao_address: govmod_single.to_string(),
+                    start_after: Some(0u64),
+                    limit: Some(101),
                 },
             )
             .unwrap();
@@ -196,6 +200,8 @@ fn test_single_check_passed_proposals() {
             contract_addr,
             &QueryMsg::HasPassedProposals {
                 dao_address: govmod_single.to_string(),
+                start_after: Some(0u64),
+                limit: Some(101),
             },
         )
         .unwrap();
@@ -332,6 +338,8 @@ fn test_multiple_check_passed_proposals() {
             contract_addr.clone(),
             &QueryMsg::HasPassedProposals {
                 dao_address: govmod_single.to_string(),
+                start_after: Some(0u64),
+                limit: Some(101),
             },
         )
         .unwrap();
@@ -363,6 +371,8 @@ fn test_multiple_check_passed_proposals() {
                 contract_addr.clone(),
                 &QueryMsg::HasPassedProposals {
                     dao_address: govmod_single.to_string(),
+                    start_after: Some(0u64),
+                    limit: Some(101),
                 },
             )
             .unwrap();
@@ -392,6 +402,8 @@ fn test_multiple_check_passed_proposals() {
             contract_addr,
             &QueryMsg::HasPassedProposals {
                 dao_address: govmod_single.to_string(),
+                start_after: Some(0u64),
+                limit: Some(101),
             },
         )
         .unwrap();

@@ -11,4 +11,7 @@ pub enum SdkError {
 
     #[error("Not enough native balance of {denom}, need {lack} more")]
     NotEnoughNative { denom: String, lack: Uint128 },
+
+    #[error("Do not send extra coins, will be permanently lost")]
+    NonRequiredDenom {},
 }

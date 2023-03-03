@@ -20,10 +20,10 @@ use crate::{
 /// Called before every method, except [crate::contract::execute_update_config]
 pub(crate) fn check_ready_for_execution(
     info: &MessageInfo,
-    config: &Config,
+    paused: bool,
 ) -> Result<(), ContractError> {
-    if config.paused {
-        Err(ContractError::Paused {})
+    if paused {
+        Err(ContractError::ContractPaused {})
     } else if !info.funds.is_empty() {
         Err(ContractError::RedundantFunds {})
     } else {
@@ -44,19 +44,7 @@ pub(crate) fn get_tasks_addr(
         )?
         .ok_or(ContractError::InvalidKey {})
 }
-pub(crate) fn query_agent_addr(
-    querier: &QuerierWrapper<Empty>,
-    config: &Config,
-) -> Result<Addr, ContractError> {
-    let (tasks_name, version) = &config.croncat_agents_key;
-    croncat_sdk_factory::state::CONTRACT_ADDRS
-        .query(
-            querier,
-            config.croncat_factory_addr.clone(),
-            (tasks_name, version),
-        )?
-        .ok_or(ContractError::InvalidKey {})
-}
+
 pub(crate) fn check_if_sender_is_tasks(
     deps_queries: &QuerierWrapper<Empty>,
     config: &Config,
@@ -110,7 +98,7 @@ pub(crate) fn attached_natives(
             if f.denom == ibc.denom {
                 ibc.amount += f.amount
             } else {
-                return Err(ContractError::TooManyCoins {});
+                return Err(ContractError::InvalidAttachedCoins {});
             }
         } else {
             ibc = Some(f);
@@ -130,7 +118,7 @@ pub(crate) fn calculate_required_natives(
             } else if c2.denom == native_denom {
                 (c2.amount, Some(c1))
             } else {
-                return Err(ContractError::TooManyCoins {});
+                return Err(ContractError::InvalidAttachedCoins {});
             }
         }
         [Some(c1), None] => {
@@ -150,7 +138,7 @@ pub(crate) fn assert_caller_is_agent_contract(
     config: &Config,
     sender: &Addr,
 ) -> Result<(), ContractError> {
-    let addr = query_agent_addr(deps_queries, config)?;
+    let addr = get_agents_addr(deps_queries, config)?;
     if addr != *sender {
         return Err(ContractError::Unauthorized {});
     }
@@ -162,7 +150,7 @@ pub fn query_agent(
     config: &Config,
     agent_id: String,
 ) -> Result<AgentResponse, ContractError> {
-    let addr = query_agent_addr(querier, config)?;
+    let addr = get_agents_addr(querier, config)?;
 
     // Get the agent from the agent contract
     let response: AgentResponse = querier.query_wasm_smart(
@@ -249,9 +237,15 @@ pub(crate) fn finalize_task(
     // Sub native for gas
     let gas_with_fees = gas_with_fees(
         queue_item.task.amount_for_one_task.gas,
-        config.agent_fee + config.treasury_fee,
+        (queue_item.task.amount_for_one_task.agent_fee
+            + queue_item.task.amount_for_one_task.treasury_fee) as u64,
     )?;
-    let native_for_gas_required = config.gas_price.calculate(gas_with_fees)?;
+    let native_for_gas_required = queue_item
+        .task
+        .amount_for_one_task
+        .gas_price
+        .calculate(gas_with_fees)
+        .unwrap();
     task_balance.native_balance = task_balance
         .native_balance
         .checked_sub(Uint128::new(native_for_gas_required))
@@ -260,10 +254,11 @@ pub(crate) fn finalize_task(
     add_fee_rewards(
         deps.storage,
         queue_item.task.amount_for_one_task.gas,
-        &config.gas_price,
+        &queue_item.task.amount_for_one_task.gas_price,
         &queue_item.agent_addr,
-        config.agent_fee,
-        config.treasury_fee,
+        queue_item.task.amount_for_one_task.agent_fee,
+        queue_item.task.amount_for_one_task.treasury_fee,
+        false,
     )?;
 
     let original_amounts = queue_item.task.amount_for_one_task.clone();
@@ -410,19 +405,19 @@ pub(crate) fn check_for_self_calls(
 ) -> Result<(), ContractError> {
     // If it one of the our contracts it should be a manager
     if contract_addr == tasks_addr || contract_addr == agents_addr {
-        return Err(ContractError::TaskNoLongerValid {});
+        return Err(ContractError::UnauthorizedMethod {});
     } else if contract_addr == manager_addr {
         // Check if caller is manager owner
         if sender != manager_owner_addr {
-            return Err(ContractError::TaskNoLongerValid {});
+            return Err(ContractError::UnauthorizedMethod {});
         } else if let Ok(msg) = cosmwasm_std::from_binary(msg) {
             // Check if it's tick
             if !matches!(msg, croncat_sdk_agents::msg::ExecuteMsg::Tick {}) {
-                return Err(ContractError::TaskNoLongerValid {});
+                return Err(ContractError::UnauthorizedMethod {});
             }
             // Other messages not allowed
         } else {
-            return Err(ContractError::TaskNoLongerValid {});
+            return Err(ContractError::UnauthorizedMethod {});
         }
     }
     Ok(())
@@ -590,7 +585,7 @@ pub fn create_task_completed_msg(
     agent_id: &Addr,
     is_block_slot_task: bool,
 ) -> Result<CosmosMsg, ContractError> {
-    let addr = query_agent_addr(querier, config)?;
+    let addr = get_agents_addr(querier, config)?;
     let args = AgentOnTaskCompleted {
         agent_id: agent_id.to_owned(),
         is_block_slot_task,

@@ -1,12 +1,23 @@
 [package]
 name = "croncat-tasks"
-version = "0.1.0"
+version = "0.1.1"
 authors = { workspace = true }
 edition = "2021"
 repository = "https://github.com/CronCats/cw-croncat"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+codegen-units = 1
+opt-level = 3
+debug = false
+rpath = false
+lto = true
+debug-assertions = false
+panic = 'abort'
+incremental = false
+overflow-checks = true
 
 [features]
 # for more explicit tests, cargo test --features=backtraces
@@ -35,5 +46,6 @@ croncat-manager = { workspace = true }
 croncat-agents = { workspace = true }
 croncat-sdk-factory = { workspace = true }
 croncat-sdk-manager = { workspace = true }
+croncat-mod-balances = { workspace = true }
 anyhow = { workspace = true }
 cw-utils = { workspace = true }

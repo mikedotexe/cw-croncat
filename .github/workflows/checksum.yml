@@ -1,10 +1,12 @@
 name: Check checksum
 
+# NOTE: Needs to checkin the checksum
 on:
-  pull_request:
-  push:
-    branches:
-      - main
+  release
+  # pull_request:
+  # push:
+  #   branches:
+  #     - main
 jobs:
   checksum:
     runs-on: ubuntu-latest

@@ -22,6 +22,15 @@ pub enum ContractError {
     #[error("Can't remove latest version")]
     LatestVersionRemove {},
 
+    #[error("Can't deploy this version, it already exists")]
+    VersionExists {},
+
     #[error("Can't remove contract unless it's paused or library")]
     NotPaused {},
+
+    #[error("Provided URL has exceeded the maximum allowable length")]
+    UrlExceededMaxLength {},
+
+    #[error("Must not nominate current owner")]
+    SameOwnerNominated {},
 }

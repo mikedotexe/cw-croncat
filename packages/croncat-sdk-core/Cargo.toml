@@ -1,6 +1,6 @@
 [package]
 name = "croncat-sdk-core"
-version = "0.1.0"
+version = "0.1.1"
 authors = { workspace = true }
 edition = "2021"
 repository = "https://github.com/CronCats/cw-croncat"
@@ -8,6 +8,7 @@ license = { workspace = true }
 description = "Contains structs and impls useful in the operation of CronCat automation"
 
 [dependencies]
+thiserror = { workspace = true }
 cosmwasm-schema = { workspace = true }
 cosmwasm-std = { workspace = true }
 cw20 = { workspace = true }

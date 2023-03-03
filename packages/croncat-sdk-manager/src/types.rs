@@ -1,59 +1,9 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, Coin, StdResult, Uint128};
+use croncat_sdk_core::types::GasPrice;
 use cw20::Cw20CoinVerified;
 
 use crate::error::SdkError;
-
-use self::gas_price_defaults::{
-    GAS_ADJUSTMENT_NUMERATOR_DEFAULT, GAS_DENOMINATOR, GAS_NUMERATOR_DEFAULT,
-};
-
-pub mod gas_price_defaults {
-    pub const GAS_NUMERATOR_DEFAULT: u64 = 4;
-    pub const GAS_ADJUSTMENT_NUMERATOR_DEFAULT: u64 = 150;
-    pub const GAS_DENOMINATOR: u64 = 100;
-}
-
-/// We can't store gas_price as floats inside cosmwasm
-/// so instead of having 0.04 we use GasPrice {4/100}
-/// and after that multiply Gas by `gas_adjustment` {150/100} (1.5)
-#[cw_serde]
-pub struct GasPrice {
-    pub numerator: u64,
-    /// Denominator is shared
-    pub denominator: u64,
-    pub gas_adjustment_numerator: u64,
-}
-
-impl GasPrice {
-    pub fn is_valid(&self) -> bool {
-        self.denominator != 0 && self.numerator != 0 && self.gas_adjustment_numerator != 0
-    }
-
-    pub fn calculate(&self, gas_amount: u64) -> Result<u128, SdkError> {
-        let gas_adjusted = gas_amount
-            .checked_mul(self.gas_adjustment_numerator)
-            .and_then(|g| g.checked_div(self.denominator))
-            .ok_or(SdkError::InvalidGas {})?;
-
-        let price = gas_adjusted
-            .checked_mul(self.numerator)
-            .and_then(|g| g.checked_div(self.denominator))
-            .ok_or(SdkError::InvalidGas {})?;
-
-        Ok(price as u128)
-    }
-}
-
-impl Default for GasPrice {
-    fn default() -> Self {
-        Self {
-            numerator: GAS_NUMERATOR_DEFAULT,
-            denominator: GAS_DENOMINATOR,
-            gas_adjustment_numerator: GAS_ADJUSTMENT_NUMERATOR_DEFAULT,
-        }
-    }
-}
 
 #[cw_serde]
 pub struct TaskBalanceResponse {
@@ -108,8 +58,12 @@ impl TaskBalance {
                     lack: req.amount * multiplier,
                 })
             }
-            // Note: we are Ok if user decided to attach "needless" cw20
-            (None, Some(_)) | (None, None) => (),
+            // Dont want untracked or differing CW20s from required
+            (None, Some(_)) => {
+                return Err(SdkError::NonRequiredDenom {});
+            }
+            // nothing attached, nothing required
+            (None, None) => (),
         }
         Ok(())
     }
@@ -139,8 +93,10 @@ impl TaskBalance {
                 addr: req.address.into_string(),
                 lack: req.amount * multiplier,
             }),
-            // Note: we are Ok if user decided to attach "needless" cw20
-            (None, Some(_)) | (None, None) => Ok(()),
+            // Dont want untracked or differing CW20s from required
+            (None, Some(_)) => Err(SdkError::NonRequiredDenom {}),
+            // nothing attached, nothing required
+            (None, None) => Ok(()),
         }
     }
 
@@ -178,8 +134,12 @@ impl TaskBalance {
 #[cw_serde]
 pub struct Config {
     // Runtime
-    pub paused: bool,
     pub owner_addr: Addr,
+
+    /// A multisig admin whose sole responsibility is to pause the contract in event of emergency.
+    /// Must be a different contract address than DAO, cannot be a regular keypair
+    /// Does not have the ability to unpause, must rely on the DAO to assess the situation and act accordingly
+    pub pause_admin: Addr,
 
     /// Address of the croncat_factory
     pub croncat_factory_addr: Addr,
@@ -190,8 +150,8 @@ pub struct Config {
     pub croncat_agents_key: (String, [u8; 2]),
 
     // Economics
-    pub agent_fee: u64,
-    pub treasury_fee: u64,
+    pub agent_fee: u16,
+    pub treasury_fee: u16,
     pub gas_price: GasPrice,
 
     // Treasury
@@ -205,10 +165,8 @@ pub struct Config {
 
 #[cw_serde]
 pub struct UpdateConfig {
-    pub owner_addr: Option<String>,
-    pub paused: Option<bool>,
-    pub agent_fee: Option<u64>,
-    pub treasury_fee: Option<u64>,
+    pub agent_fee: Option<u16>,
+    pub treasury_fee: Option<u16>,
     pub gas_price: Option<GasPrice>,
     pub croncat_tasks_key: Option<(String, [u8; 2])>,
     pub croncat_agents_key: Option<(String, [u8; 2])>,
@@ -300,14 +258,6 @@ mod test {
     }
 
     #[test]
-    fn failed_gas_calculations() {
-        let gas_price_wrapper = GasPrice::default();
-
-        let err = gas_price_wrapper.calculate(u64::MAX).unwrap_err();
-        assert!(matches!(err, SdkError::InvalidGas {}));
-    }
-
-    #[test]
     fn verify_enough_attached_ok_test() {
         let native_balance = Uint128::from(100u64);
         let cw20 = Cw20CoinVerified {
@@ -335,12 +285,18 @@ mod test {
             cw20_balance: Some(cw20.clone()),
             ibc_balance: Some(ibc_coin.clone()),
         };
+        // TODO:
+        println!(
+            "HHHHHHHH = {:?}",
+            task_balance.verify_enough_attached(Uint128::from(100u64), None, None, false, "denom")
+        );
+        // We're now validating you're not adding tokens that never get used, #noMoreBlackHoles
         assert!(task_balance
             .verify_enough_attached(Uint128::from(100u64), None, None, false, "denom")
-            .is_ok());
+            .is_err());
         assert!(task_balance
             .verify_enough_attached(Uint128::from(50u64), None, None, true, "denom")
-            .is_ok());
+            .is_err());
         assert!(task_balance
             .verify_enough_attached(
                 Uint128::from(100u64),

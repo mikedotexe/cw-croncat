@@ -4,9 +4,22 @@ version = "0.1.0"
 authors = []
 edition = "2021"
 repository = "https://github.com/CronCats/cw-croncat"
+license = { workspace = true }
+description = "Provides CosmWasm queries of NFT contracts, helpful when making CronCat tasks with queries."
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+codegen-units = 1
+opt-level = 3
+debug = false
+rpath = false
+lto = true
+debug-assertions = false
+panic = 'abort'
+incremental = false
+overflow-checks = true
 
 [features]
 # for more explicit tests, cargo test --features=backtraces

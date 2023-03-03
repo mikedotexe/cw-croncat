@@ -6,12 +6,11 @@ use cosmwasm_std::{
 };
 use croncat_sdk_core::internal_messages::agents::AgentWithdrawOnRemovalArgs;
 use croncat_sdk_core::internal_messages::manager::{ManagerCreateTaskBalance, ManagerRemoveTask};
-
 use croncat_sdk_manager::msg::AgentWithdrawCallback;
 use croncat_sdk_manager::types::{TaskBalance, TaskBalanceResponse, UpdateConfig};
-use croncat_sdk_tasks::types::{Interval, TaskInfo};
+use croncat_sdk_tasks::types::{Interval, Task, TaskInfo};
 use cw2::set_contract_version;
-use cw_utils::parse_reply_execute_data;
+use cw_utils::{may_pay, parse_reply_execute_data};
 
 use crate::balances::{
     add_fee_rewards, execute_owner_withdraw, execute_receive_cw20, execute_refill_native_balance,
@@ -27,13 +26,14 @@ use crate::helpers::{
 };
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{
-    Config, QueueItem, AGENT_REWARDS, CONFIG, REPLY_QUEUE, TASKS_BALANCES, TREASURY_BALANCE,
+    Config, QueueItem, AGENT_REWARDS, CONFIG, PAUSED, REPLY_QUEUE, TASKS_BALANCES, TREASURY_BALANCE,
 };
+use crate::ContractError::InvalidPercentage;
 
 pub(crate) const CONTRACT_NAME: &str = "crate:croncat-manager";
 pub(crate) const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub(crate) const DEFAULT_FEE: u64 = 5;
+pub(crate) const DEFAULT_FEE: u16 = 5;
 
 /// reply id from tasks contract
 pub(crate) const TASK_REPLY: u64 = u64::from_be_bytes(*b"croncat1");
@@ -53,15 +53,17 @@ pub fn instantiate(
 ) -> Result<Response, ContractError> {
     // Deconstruct so we don't miss fields
     let InstantiateMsg {
-        denom,
         version,
         croncat_tasks_key,
         croncat_agents_key,
-        owner_addr,
+        pause_admin,
         gas_price,
         treasury_addr,
         cw20_whitelist,
     } = msg;
+
+    // Query for the denom
+    let denom = deps.querier.query_bonded_denom()?;
 
     let gas_price = gas_price.unwrap_or_default();
     // Make sure gas_price is valid
@@ -69,18 +71,23 @@ pub fn instantiate(
         return Err(ContractError::InvalidGasPrice {});
     }
 
-    let owner_addr = owner_addr
-        .map(|human| deps.api.addr_validate(&human))
-        .transpose()?
-        .unwrap_or_else(|| info.sender.clone());
+    let owner_addr = info.sender.clone();
 
-    //Check if we attached some funds in native denom, add them into treasury
-    let treasury_funds = info.funds.iter().find(|coin| coin.denom == denom);
-    if let Some(funds) = treasury_funds {
-        TREASURY_BALANCE.save(deps.storage, &funds.amount)?;
-    } else {
-        TREASURY_BALANCE.save(deps.storage, &Uint128::zero())?;
+    // Validate pause_admin
+    // MUST: only be contract address
+    // MUST: not be same address as factory owner (DAO)
+    // Any factory action should be done by the owner_addr
+    let pause_addr = deps.api.addr_validate(pause_admin.as_str())?;
+    if owner_addr == pause_addr || pause_addr.to_string().len() != 63 {
+        return Err(ContractError::InvalidPauseAdmin {});
     }
+
+    // Check if we attached some funds in native denom, add them into treasury
+    let treasury_funds = may_pay(&info, denom.as_str());
+    if treasury_funds.is_err() {
+        return Err(ContractError::RedundantFunds {});
+    }
+    TREASURY_BALANCE.save(deps.storage, &treasury_funds.unwrap())?;
 
     let cw20_whitelist = cw20_whitelist
         .unwrap_or_default()
@@ -89,8 +96,8 @@ pub fn instantiate(
         .collect::<StdResult<_>>()?;
 
     let config = Config {
-        paused: false,
         owner_addr,
+        pause_admin,
         croncat_factory_addr: info.sender,
         croncat_tasks_key,
         croncat_agents_key,
@@ -107,6 +114,7 @@ pub fn instantiate(
 
     // Update state
     CONFIG.save(deps.storage, &config)?;
+    PAUSED.save(deps.storage, &false)?;
     set_contract_version(
         deps.storage,
         CONTRACT_NAME,
@@ -115,7 +123,6 @@ pub fn instantiate(
 
     Ok(Response::new()
         .add_attribute("action", "instantiate")
-        .add_attribute("paused", config.paused.to_string())
         .add_attribute("owner_id", config.owner_addr.to_string()))
 }
 
@@ -136,11 +143,13 @@ pub fn execute(
         ExecuteMsg::RefillTaskCw20Balance { task_hash, cw20 } => {
             execute_refill_task_cw20(deps, info, task_hash, cw20)
         }
-        ExecuteMsg::CreateTaskBalance(msg) => execute_create_task_balance(deps, info, msg),
+        ExecuteMsg::CreateTaskBalance(msg) => execute_create_task_balance(deps, info, *msg),
         ExecuteMsg::RemoveTask(msg) => execute_remove_task(deps, info, msg),
         ExecuteMsg::OwnerWithdraw {} => execute_owner_withdraw(deps, info),
         ExecuteMsg::UserWithdraw { limit } => execute_user_withdraw(deps, info, limit),
         ExecuteMsg::AgentWithdraw(args) => execute_withdraw_agent_rewards(deps, info, args),
+        ExecuteMsg::PauseContract {} => execute_pause(deps, info),
+        ExecuteMsg::UnpauseContract {} => execute_unpause(deps, info),
     }
 }
 
@@ -176,8 +185,9 @@ fn execute_proxy_call(
     info: MessageInfo,
     task_hash: Option<String>,
 ) -> Result<Response, ContractError> {
+    let paused = PAUSED.load(deps.storage)?;
+    check_ready_for_execution(&info, paused)?;
     let config: Config = CONFIG.load(deps.storage)?;
-    check_ready_for_execution(&info, &config)?;
 
     let agent_addr = info.sender;
     let agents_addr = get_agents_addr(&deps.querier, &config)?;
@@ -197,14 +207,33 @@ fn execute_proxy_call(
         if agent_response.agent.map_or(true, |agent| {
             agent.status != croncat_sdk_agents::types::AgentStatus::Active
         }) {
-            return Err(ContractError::NoTaskForAgent {});
+            return Err(ContractError::AgentNotActive {});
         }
 
         // A hash means agent is attempting to execute evented task
-        deps.querier.query_wasm_smart(
+        let task_data: croncat_sdk_tasks::types::TaskResponse = deps.querier.query_wasm_smart(
             tasks_addr.clone(),
             &croncat_sdk_tasks::msg::TasksQueryMsg::Task { task_hash: hash },
-        )?
+        )?;
+
+        // Check the task is evented
+        if let Some(task) = task_data.clone().task {
+            let t = Task {
+                owner_addr: task.owner_addr,
+                interval: task.interval,
+                boundary: task.boundary,
+                stop_on_fail: task.stop_on_fail,
+                amount_for_one_task: task.amount_for_one_task,
+                actions: task.actions,
+                queries: task.queries.unwrap_or_default(),
+                transforms: task.transforms,
+                version: task.version,
+            };
+            if !t.is_evented() {
+                return Err(ContractError::NoTaskForAgent {});
+            }
+        }
+        task_data
     } else {
         // For scheduled case - check only active agents that are allowed tasks
         let agent_tasks: croncat_sdk_agents::msg::AgentTaskResponse =
@@ -244,6 +273,7 @@ fn execute_proxy_call(
             agent_addr,
             tasks_addr,
             Some(vec![Attribute::new("lifecycle", "task_ended")]),
+            true,
         );
     }
 
@@ -297,6 +327,7 @@ fn execute_proxy_call(
                 agent_addr,
                 tasks_addr,
                 Some(vec![Attribute::new("lifecycle", "task_invalidated")]),
+                false,
             );
         }
     }
@@ -321,13 +352,22 @@ fn end_task(
     agent_addr: Addr,
     tasks_addr: Addr,
     attrs: Option<Vec<Attribute>>,
+    reimburse_only: bool,
 ) -> Result<Response, ContractError> {
     // Sub gas/fee from native
-    let gas_with_fees = gas_with_fees(
-        task.amount_for_one_task.gas,
-        config.agent_fee + config.treasury_fee,
-    )?;
-    let native_for_gas_required = config.gas_price.calculate(gas_with_fees)?;
+    let gas_with_fees = if reimburse_only {
+        gas_with_fees(task.amount_for_one_task.gas, 0u64)?
+    } else {
+        gas_with_fees(
+            task.amount_for_one_task.gas,
+            (task.amount_for_one_task.agent_fee + task.amount_for_one_task.treasury_fee) as u64,
+        )?
+    };
+    let native_for_gas_required = task
+        .amount_for_one_task
+        .gas_price
+        .calculate(gas_with_fees)
+        .unwrap();
     let mut task_balance = TASKS_BALANCES.load(deps.storage, task.task_hash.as_bytes())?;
     task_balance.native_balance = task_balance
         .native_balance
@@ -335,13 +375,15 @@ fn end_task(
         .map_err(StdError::overflow)?;
 
     // Account for fees, to reimburse agent for efforts
+    // TODO: Need to NOT add fee for non-reimberse
     add_fee_rewards(
         deps.storage,
         task.amount_for_one_task.gas,
-        &config.gas_price,
+        &task.amount_for_one_task.gas_price,
         &agent_addr,
-        config.agent_fee,
-        config.treasury_fee,
+        task.amount_for_one_task.agent_fee,
+        task.amount_for_one_task.treasury_fee,
+        reimburse_only,
     )?;
 
     // refund the final balances to task owner
@@ -379,8 +421,6 @@ pub fn execute_update_config(
     CONFIG.update(deps.storage, |mut config| {
         // Deconstruct, so we don't miss any fields
         let UpdateConfig {
-            owner_addr,
-            paused,
             agent_fee,
             treasury_fee,
             gas_price,
@@ -394,15 +434,27 @@ pub fn execute_update_config(
             return Err(ContractError::Unauthorized {});
         }
 
+        let updated_agent_fee = if let Some(agent_fee) = agent_fee {
+            // Validate it
+            validate_percentage_value(&agent_fee, "agent_fee")?;
+            agent_fee
+        } else {
+            // Use current value in config
+            config.agent_fee
+        };
+
+        let updated_treasury_fee = if let Some(treasury_fee) = treasury_fee {
+            validate_percentage_value(&treasury_fee, "treasury_fee")?;
+            treasury_fee
+        } else {
+            config.treasury_fee
+        };
+
         let gas_price = gas_price.unwrap_or(config.gas_price);
         if !gas_price.is_valid() {
             return Err(ContractError::InvalidGasPrice {});
         }
 
-        let owner_addr = owner_addr
-            .map(|human| deps.api.addr_validate(&human))
-            .transpose()?
-            .unwrap_or(config.owner_addr);
         let treasury_addr = if let Some(human) = treasury_addr {
             Some(deps.api.addr_validate(&human)?)
         } else {
@@ -418,13 +470,13 @@ pub fn execute_update_config(
         config.cw20_whitelist.extend(cw20_whitelist);
 
         let new_config = Config {
-            paused: paused.unwrap_or(config.paused),
-            owner_addr,
+            owner_addr: config.owner_addr,
+            pause_admin: config.pause_admin,
             croncat_factory_addr: config.croncat_factory_addr,
             croncat_tasks_key: croncat_tasks_key.unwrap_or(config.croncat_tasks_key),
             croncat_agents_key: croncat_agents_key.unwrap_or(config.croncat_agents_key),
-            agent_fee: agent_fee.unwrap_or(config.agent_fee),
-            treasury_fee: treasury_fee.unwrap_or(config.treasury_fee),
+            agent_fee: updated_agent_fee,
+            treasury_fee: updated_treasury_fee,
             gas_price,
             cw20_whitelist: config.cw20_whitelist,
             native_denom: config.native_denom,
@@ -458,9 +510,9 @@ fn execute_create_task_balance(
     {
         let gas_with_fees = gas_with_fees(
             msg.amount_for_one_task.gas,
-            config.agent_fee + config.treasury_fee,
+            (config.agent_fee + config.treasury_fee) as u64,
         )?;
-        let native_for_gas_required = config.gas_price.calculate(gas_with_fees)?;
+        let native_for_gas_required = config.gas_price.calculate(gas_with_fees).unwrap();
         let (native_for_sends_required, ibc_required) =
             calculate_required_natives(msg.amount_for_one_task.coin, &config.native_denom)?;
         tasks_balance.verify_enough_attached(
@@ -482,9 +534,10 @@ fn execute_withdraw_agent_rewards(
     info: MessageInfo,
     args: Option<AgentWithdrawOnRemovalArgs>,
 ) -> Result<Response, ContractError> {
-    let config: Config = CONFIG.load(deps.storage)?;
     //assert if contract is ready for execution
-    check_ready_for_execution(&info, &config)?;
+    let paused = PAUSED.load(deps.storage)?;
+    check_ready_for_execution(&info, paused)?;
+    let config: Config = CONFIG.load(deps.storage)?;
 
     let agent_id: Addr;
     let payable_account_id: Addr;
@@ -534,10 +587,35 @@ fn execute_withdraw_agent_rewards(
         .add_attribute("rewards", agent_rewards))
 }
 
+pub fn execute_pause(deps: DepsMut, info: MessageInfo) -> Result<Response, ContractError> {
+    if PAUSED.load(deps.storage)? {
+        return Err(ContractError::ContractPaused);
+    }
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.pause_admin {
+        return Err(ContractError::Unauthorized {});
+    }
+    PAUSED.save(deps.storage, &true)?;
+    Ok(Response::new().add_attribute("action", "pause_contract"))
+}
+
+pub fn execute_unpause(deps: DepsMut, info: MessageInfo) -> Result<Response, ContractError> {
+    if !PAUSED.load(deps.storage)? {
+        return Err(ContractError::ContractUnpaused);
+    }
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.owner_addr {
+        return Err(ContractError::Unauthorized {});
+    }
+    PAUSED.save(deps.storage, &false)?;
+    Ok(Response::new().add_attribute("action", "unpause_contract"))
+}
+
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&CONFIG.load(deps.storage)?),
+        QueryMsg::Paused {} => to_binary(&PAUSED.load(deps.storage)?),
         QueryMsg::TreasuryBalance {} => to_binary(&TREASURY_BALANCE.load(deps.storage)?),
         QueryMsg::UsersBalances {
             address,
@@ -605,5 +683,20 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractE
                 Ok(Response::new())
             }
         }
+    }
+}
+
+/// Validate when a given value should be a reasonable percentage.
+/// Due to low native token prices on some chains, we must allow for
+/// greater than 100% in order to be sustainable, and have gone with
+/// a max of 10,000% after internal discussion and looking at the numbers.
+/// Since it's unsigned, don't check for negatives
+fn validate_percentage_value(val: &u16, field_name: &str) -> Result<(), ContractError> {
+    if val > &10_000u16 {
+        Err(InvalidPercentage {
+            field: field_name.to_string(),
+        })
+    } else {
+        Ok(())
     }
 }

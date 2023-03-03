@@ -9,7 +9,7 @@ use mod_sdk::types::QueryResponse;
 
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::types::dao::{ProposalListResponse, ProposalResponse, QueryDao, Status};
-use crate::types::ProposalStatusMatches;
+use crate::types::{ProposalStatusMatches, DEFAULT_PAGINATION_FROM_INDEX};
 use crate::ContractError;
 
 // version info for migration info
@@ -52,12 +52,21 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             proposal_id,
             status,
         )?),
-        QueryMsg::HasPassedProposals { dao_address } => {
-            to_binary(&query_dao_proposals(deps, dao_address)?)
-        }
-        QueryMsg::HasPassedProposalWithMigration { dao_address } => {
-            to_binary(&query_proposals_with_migration(deps, dao_address)?)
-        }
+        QueryMsg::HasPassedProposals {
+            dao_address,
+            start_after,
+            limit,
+        } => to_binary(&query_dao_proposals(deps, dao_address, start_after, limit)?),
+        QueryMsg::HasPassedProposalWithMigration {
+            dao_address,
+            start_after,
+            limit,
+        } => to_binary(&query_proposals_with_migration(
+            deps,
+            dao_address,
+            start_after,
+            limit,
+        )?),
         QueryMsg::HasProposalsGtId { dao_address, value } => {
             to_binary(&query_has_new(deps, dao_address, value)?)
         }
@@ -92,16 +101,24 @@ fn query_dao_proposal_status(
 /// Response: QueryResponse
 /// Returns true if there's at least one passed proposal
 /// Data contains a vector of passed proposals
-fn query_dao_proposals(deps: Deps, dao_address: String) -> StdResult<QueryResponse> {
+fn query_dao_proposals(
+    deps: Deps,
+    dao_address: String,
+    start_after: Option<u64>,
+    limit: Option<u64>,
+) -> StdResult<QueryResponse> {
     let dao_addr = deps.api.addr_validate(&dao_address)?;
-    // Query the amount of proposals
-    let proposal_count = deps
-        .querier
-        .query_wasm_smart(dao_addr.clone(), &QueryDao::ProposalCount {})?;
+    // Query the amount of proposals if no limit is passed in
+    let proposal_count = if let Some(limit) = limit {
+        limit
+    } else {
+        deps.querier
+            .query_wasm_smart(dao_addr.clone(), &QueryDao::ProposalCount {})?
+    };
     let res: ProposalListResponse = deps.querier.query_wasm_smart(
         dao_addr,
         &QueryDao::ListProposals {
-            start_after: None,
+            start_after: Some(start_after.unwrap_or(DEFAULT_PAGINATION_FROM_INDEX)),
             limit: Some(proposal_count),
         },
     )?;
@@ -126,21 +143,29 @@ fn query_dao_proposals(deps: Deps, dao_address: String) -> StdResult<QueryRespon
 /// Response: QueryResponse
 /// Returns true if there's at least one passed proposal with Migration message
 /// Data contains a vector of ids of passed proposals with Migration message
-fn query_proposals_with_migration(deps: Deps, dao_address: String) -> StdResult<QueryResponse> {
+fn query_proposals_with_migration(
+    deps: Deps,
+    dao_address: String,
+    start_after: Option<u64>,
+    limit: Option<u64>,
+) -> StdResult<QueryResponse> {
     let dao_addr = deps.api.addr_validate(&dao_address)?;
     let mut with_migration = vec![];
 
-    // Query the amount of proposals
-    let proposal_count = deps
-        .querier
-        .query_wasm_smart(dao_addr.clone(), &QueryDao::ProposalCount {})?;
+    // Query the amount of proposals if no limit is passed in
+    let proposal_count = if let Some(limit) = limit {
+        limit
+    } else {
+        deps.querier
+            .query_wasm_smart(dao_addr.clone(), &QueryDao::ProposalCount {})?
+    };
 
     // Try to list proposals for the case of single choice proposal
     let res_opt: StdResult<dao_proposal_single::query::ProposalListResponse> =
         deps.querier.query_wasm_smart(
             dao_addr.clone(),
             &QueryDao::ListProposals {
-                start_after: None,
+                start_after: Some(start_after.unwrap_or(DEFAULT_PAGINATION_FROM_INDEX)),
                 limit: Some(proposal_count),
             },
         );
@@ -162,7 +187,7 @@ fn query_proposals_with_migration(deps: Deps, dao_address: String) -> StdResult<
             deps.querier.query_wasm_smart(
                 dao_addr,
                 &QueryDao::ListProposals {
-                    start_after: None,
+                    start_after: Some(start_after.unwrap_or(DEFAULT_PAGINATION_FROM_INDEX)),
                     limit: Some(proposal_count),
                 },
             )?;

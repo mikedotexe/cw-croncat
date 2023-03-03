@@ -125,11 +125,6 @@ export class CroncatFactoryQueryClient implements CroncatFactoryReadOnlyInterfac
 export interface CroncatFactoryInterface extends CroncatFactoryReadOnlyInterface {
   contractAddress: string;
   sender: string;
-  updateConfig: ({
-    ownerAddr
-  }: {
-    ownerAddr: string;
-  }, fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
   deploy: ({
     kind,
     moduleInstantiateInfo
@@ -160,6 +155,13 @@ export interface CroncatFactoryInterface extends CroncatFactoryReadOnlyInterface
   }: {
     msg: WasmMsg;
   }, fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
+  nominateOwner: ({
+    nominatedOwnerAddr
+  }: {
+    nominatedOwnerAddr: string;
+  }, fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
+  acceptNominateOwner: (fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
+  removeNominateOwner: (fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
 }
 export class CroncatFactoryClient extends CroncatFactoryQueryClient implements CroncatFactoryInterface {
   client: SigningCosmWasmClient;
@@ -171,24 +173,15 @@ export class CroncatFactoryClient extends CroncatFactoryQueryClient implements C
     this.client = client;
     this.sender = sender;
     this.contractAddress = contractAddress;
-    this.updateConfig = this.updateConfig.bind(this);
     this.deploy = this.deploy.bind(this);
     this.remove = this.remove.bind(this);
     this.updateMetadata = this.updateMetadata.bind(this);
     this.proxy = this.proxy.bind(this);
+    this.nominateOwner = this.nominateOwner.bind(this);
+    this.acceptNominateOwner = this.acceptNominateOwner.bind(this);
+    this.removeNominateOwner = this.removeNominateOwner.bind(this);
   }
 
-  updateConfig = async ({
-    ownerAddr
-  }: {
-    ownerAddr: string;
-  }, fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
-    return await this.client.execute(this.sender, this.contractAddress, {
-      update_config: {
-        owner_addr: ownerAddr
-      }
-    }, fee, memo, funds);
-  };
   deploy = async ({
     kind,
     moduleInstantiateInfo
@@ -246,6 +239,27 @@ export class CroncatFactoryClient extends CroncatFactoryQueryClient implements C
       proxy: {
         msg
       }
+    }, fee, memo, funds);
+  };
+  nominateOwner = async ({
+    nominatedOwnerAddr
+  }: {
+    nominatedOwnerAddr: string;
+  }, fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
+    return await this.client.execute(this.sender, this.contractAddress, {
+      nominate_owner: {
+        nominated_owner_addr: nominatedOwnerAddr
+      }
+    }, fee, memo, funds);
+  };
+  acceptNominateOwner = async (fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
+    return await this.client.execute(this.sender, this.contractAddress, {
+      accept_nominate_owner: {}
+    }, fee, memo, funds);
+  };
+  removeNominateOwner = async (fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
+    return await this.client.execute(this.sender, this.contractAddress, {
+      remove_nominate_owner: {}
     }, fee, memo, funds);
   };
 }

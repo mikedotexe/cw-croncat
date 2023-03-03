@@ -4,6 +4,10 @@ use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 
 pub const CONFIG: Item<Config> = Item::new("config");
 
+/// Controls whether or not the contract is paused. Can only be changed to TRUE by
+/// the pause_admin, can only be unpaused by DAO/owner_addr
+pub const PAUSED: Item<bool> = Item::new("paused");
+
 /// Total amount of tasks
 pub const TASKS_TOTAL: Item<u64> = Item::new("tasks_total");
 

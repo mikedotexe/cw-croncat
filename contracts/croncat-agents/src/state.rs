@@ -7,6 +7,10 @@ use cw_storage_plus::{Deque, Item, Map};
 /// Contract config, just the owner address for now, preferably dao
 pub const CONFIG: Item<Config> = Item::new("agents_config");
 
+/// Controls whether or not the contract is paused. Can only be changed to TRUE by
+/// the pause_admin, can only be unpaused by DAO/owner_addr
+pub const PAUSED: Item<bool> = Item::new("paused");
+
 pub(crate) const DEFAULT_NOMINATION_BLOCK_DURATION: u16 = 10;
 pub(crate) const DEFAULT_MIN_TASKS_PER_AGENT: u64 = 3;
 pub(crate) const DEFAULT_MIN_COINS_FOR_AGENT_REGISTRATION: u64 = 200_000;

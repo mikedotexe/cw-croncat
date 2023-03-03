@@ -190,6 +190,8 @@ fn test_dao_single_proposals_with_migration() {
             contract_addr.clone(),
             &QueryMsg::HasPassedProposalWithMigration {
                 dao_address: govmod_single.to_string(),
+                start_after: Some(0u64),
+                limit: Some(101),
             },
         )
         .unwrap();
@@ -222,6 +224,8 @@ fn test_dao_single_proposals_with_migration() {
             contract_addr.clone(),
             &QueryMsg::HasPassedProposalWithMigration {
                 dao_address: govmod_single.to_string(),
+                start_after: Some(0u64),
+                limit: Some(101),
             },
         )
         .unwrap();
@@ -265,6 +269,8 @@ fn test_dao_single_proposals_with_migration() {
             contract_addr.clone(),
             &QueryMsg::HasPassedProposalWithMigration {
                 dao_address: govmod_single.to_string(),
+                start_after: Some(0u64),
+                limit: Some(101),
             },
         )
         .unwrap();
@@ -297,6 +303,8 @@ fn test_dao_single_proposals_with_migration() {
             contract_addr,
             &QueryMsg::HasPassedProposalWithMigration {
                 dao_address: govmod_single.to_string(),
+                start_after: Some(0u64),
+                limit: Some(101),
             },
         )
         .unwrap();
@@ -559,6 +567,8 @@ fn test_dao_multiple_proposals_with_migration() {
             contract_addr.clone(),
             &QueryMsg::HasPassedProposalWithMigration {
                 dao_address: govmod_single.to_string(),
+                start_after: Some(0u64),
+                limit: Some(101),
             },
         )
         .unwrap();
@@ -591,6 +601,8 @@ fn test_dao_multiple_proposals_with_migration() {
             contract_addr.clone(),
             &QueryMsg::HasPassedProposalWithMigration {
                 dao_address: govmod_single.to_string(),
+                start_after: Some(0u64),
+                limit: Some(101),
             },
         )
         .unwrap();
@@ -635,6 +647,8 @@ fn test_dao_multiple_proposals_with_migration() {
             contract_addr.clone(),
             &QueryMsg::HasPassedProposalWithMigration {
                 dao_address: govmod_single.to_string(),
+                start_after: Some(0u64),
+                limit: Some(101),
             },
         )
         .unwrap();
@@ -679,6 +693,8 @@ fn test_dao_multiple_proposals_with_migration() {
             contract_addr,
             &QueryMsg::HasPassedProposalWithMigration {
                 dao_address: govmod_single.to_string(),
+                start_after: Some(0u64),
+                limit: Some(101),
             },
         )
         .unwrap();

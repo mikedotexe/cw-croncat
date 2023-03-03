@@ -1,6 +1,6 @@
 {
   "contract_name": "croncat-agents",
-  "contract_version": "0.1.0",
+  "contract_version": "0.1.1",
   "idl_version": "1.0.0",
   "instantiate": {
     "$schema": "http://json-schema.org/draft-07/schema#",
@@ -8,7 +8,8 @@
     "type": "object",
     "required": [
       "croncat_manager_key",
-      "croncat_tasks_key"
+      "croncat_tasks_key",
+      "pause_admin"
     ],
     "properties": {
       "agent_nomination_duration": {
@@ -80,7 +81,7 @@
         "format": "uint16",
         "minimum": 0.0
       },
-      "min_coin_for_agent_registration": {
+      "min_coins_for_agent_registration": {
         "description": "The required amount needed to actually execute a few tasks before withdraw profits. This helps make sure agent wont get stuck out the gate",
         "type": [
           "integer",
@@ -98,11 +99,12 @@
         "format": "uint64",
         "minimum": 0.0
       },
-      "owner_addr": {
-        "description": "Address of the contract owner, defaults to the sender",
-        "type": [
-          "string",
-          "null"
+      "pause_admin": {
+        "description": "A multisig admin whose sole responsibility is to pause the contract in event of emergency. Must be a different contract address than DAO, cannot be a regular keypair Does not have the ability to unpause, must rely on the DAO to assess the situation and act accordingly",
+        "allOf": [
+          {
+            "$ref": "#/definitions/Addr"
+          }
         ]
       },
       "version": {
@@ -113,7 +115,13 @@
         ]
       }
     },
-    "additionalProperties": false
+    "additionalProperties": false,
+    "definitions": {
+      "Addr": {
+        "description": "A human readable address.\n\nIn Cosmos, this is typically bech32 encoded. But for multi-chain smart contracts no assumptions should be made other than being UTF-8 encoded and of reasonable length.\n\nThis type represents a validated address. It can be created in the following ways 1. Use `Addr::unchecked(input)` 2. Use `let checked: Addr = deps.api.addr_validate(input)?` 3. Use `let checked: Addr = deps.api.addr_humanize(canonical_addr)?` 4. Deserialize from JSON. This must only be done from JSON that was validated before such as a contract's state. `Addr` must not be used in messages sent by the user because this would result in unvalidated instances.\n\nThis type is immutable. If you really need to mutate it (Really? Are you sure?), create a mutable copy using `let mut mutable = Addr::to_string()` and operate on that `String` instance.",
+        "type": "string"
+      }
+    }
   },
   "execute": {
     "$schema": "http://json-schema.org/draft-07/schema#",
@@ -261,6 +269,34 @@
           }
         },
         "additionalProperties": false
+      },
+      {
+        "description": "Pauses all operations for this contract, can only be done by pause_admin",
+        "type": "object",
+        "required": [
+          "pause_contract"
+        ],
+        "properties": {
+          "pause_contract": {
+            "type": "object",
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "unpauses all operations for this contract, can only be unpaused by owner_addr",
+        "type": "object",
+        "required": [
+          "unpause_contract"
+        ],
+        "properties": {
+          "unpause_contract": {
+            "type": "object",
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
       }
     ],
     "definitions": {
@@ -309,13 +345,6 @@
             ],
             "format": "uint64",
             "minimum": 0.0
-          },
-          "croncat_factory_addr": {
-            "description": "Address of the factory contract",
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "croncat_manager_key": {
             "description": "Name of the key for raw querying Manager address from the factory",
@@ -391,20 +420,6 @@
             ],
             "format": "uint64",
             "minimum": 0.0
-          },
-          "owner_addr": {
-            "description": "Contract owner address",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "paused": {
-            "description": "Contract paused state, if contract is paused some action will not be available for execution",
-            "type": [
-              "boolean",
-              "null"
-            ]
           }
         },
         "additionalProperties": false
@@ -505,6 +520,20 @@
           }
         },
         "additionalProperties": false
+      },
+      {
+        "description": "Helper for query responses on versioned contracts",
+        "type": "object",
+        "required": [
+          "paused"
+        ],
+        "properties": {
+          "paused": {
+            "type": "object",
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
       }
     ]
   },
@@ -526,7 +555,7 @@
         "min_coins_for_agent_registration",
         "min_tasks_per_agent",
         "owner_addr",
-        "paused"
+        "pause_admin"
       ],
       "properties": {
         "agent_nomination_block_duration": {
@@ -617,9 +646,13 @@
             }
           ]
         },
-        "paused": {
-          "description": "If contract was paused/unpaused",
-          "type": "boolean"
+        "pause_admin": {
+          "description": "A multisig admin whose sole responsibility is to pause the contract in event of emergency. Must be a different contract address than DAO, cannot be a regular keypair Does not have the ability to unpause, must rely on the DAO to assess the situation and act accordingly",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Addr"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -817,6 +850,11 @@
           "type": "string"
         }
       }
+    },
+    "paused": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Boolean",
+      "type": "boolean"
     }
   }
 }

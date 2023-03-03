@@ -1,12 +1,23 @@
 [package]
 name = "croncat-manager"
-version = "0.1.0"
+version = "0.1.1"
 authors = { workspace = true }
 edition = "2021"
 repository = "https://github.com/CronCats/cw-croncat"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+codegen-units = 1
+opt-level = 3
+debug = false
+rpath = false
+lto = true
+debug-assertions = false
+panic = 'abort'
+incremental = false
+overflow-checks = true
 
 [features]
 # for more explicit tests, cargo test --features=backtraces
@@ -15,7 +26,7 @@ backtraces = ["cosmwasm-std/backtraces"]
 library = []
 
 [dependencies]
-cosmwasm-std = { workspace = true }
+cosmwasm-std = { workspace = true, features = ["staking"] }
 cosmwasm-schema = { workspace = true }
 croncat-sdk-manager = { workspace = true }
 croncat-sdk-agents = { workspace = true }

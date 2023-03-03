@@ -14,6 +14,9 @@ pub enum ContractError {
     #[error(transparent)]
     ParseReplyError(#[from] ParseReplyError),
 
+    #[error("Account is either not a registered agent or is not active yet")]
+    AgentNotActive {},
+
     #[error("No coin balance found")]
     EmptyBalance {},
 
@@ -23,14 +26,28 @@ pub enum ContractError {
     #[error("Unauthorized")]
     Unauthorized {},
 
-    #[error("Contract paused")]
-    Paused {},
+    #[error("Unauthorized method, restricted to owner or not allowed")]
+    UnauthorizedMethod {},
 
-    #[error("Must not attach funds")]
+    #[error("Invalid Pause Admin")]
+    InvalidPauseAdmin,
+
+    #[error("Contract is in paused state")]
+    ContractPaused,
+
+    #[error("Contract is in unpaused state")]
+    ContractUnpaused,
+
+    #[error("Must not attach funds of this coin denom")]
     RedundantFunds {},
 
-    #[error("Only up to one ibc coin supported")]
-    TooManyCoins {},
+    #[error(
+        "Invalid attached coins. Coins are limited to native and ibc coins configured by owner"
+    )]
+    InvalidAttachedCoins {},
+
+    #[error("Task balance is empty cannot continue")]
+    TaskBalanceEmpty {},
 
     #[error("Unknown task hash")]
     NoTaskHash {},
@@ -65,4 +82,7 @@ pub enum ContractError {
 
     #[error("This cw20 address is not supported")]
     NotSupportedCw20 {},
+
+    #[error("Must provide percentage value (0-100) for field: {field}")]
+    InvalidPercentage { field: String },
 }

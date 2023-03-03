@@ -1,6 +1,6 @@
 {
   "contract_name": "croncat-tasks",
-  "contract_version": "0.1.0",
+  "contract_version": "0.1.1",
   "idl_version": "1.0.0",
   "instantiate": {
     "$schema": "http://json-schema.org/draft-07/schema#",
@@ -9,7 +9,8 @@
     "required": [
       "chain_name",
       "croncat_agents_key",
-      "croncat_manager_key"
+      "croncat_manager_key",
+      "pause_admin"
     ],
     "properties": {
       "chain_name": {
@@ -94,11 +95,12 @@
         "format": "uint64",
         "minimum": 0.0
       },
-      "owner_addr": {
-        "description": "Address of the contract owner, defaults to the sender",
-        "type": [
-          "string",
-          "null"
+      "pause_admin": {
+        "description": "A multisig admin whose sole responsibility is to pause the contract in event of emergency. Must be a different contract address than DAO, cannot be a regular keypair Does not have the ability to unpause, must rely on the DAO to assess the situation and act accordingly",
+        "allOf": [
+          {
+            "$ref": "#/definitions/Addr"
+          }
         ]
       },
       "slot_granularity_time": {
@@ -118,7 +120,13 @@
         ]
       }
     },
-    "additionalProperties": false
+    "additionalProperties": false,
+    "definitions": {
+      "Addr": {
+        "description": "A human readable address.\n\nIn Cosmos, this is typically bech32 encoded. But for multi-chain smart contracts no assumptions should be made other than being UTF-8 encoded and of reasonable length.\n\nThis type represents a validated address. It can be created in the following ways 1. Use `Addr::unchecked(input)` 2. Use `let checked: Addr = deps.api.addr_validate(input)?` 3. Use `let checked: Addr = deps.api.addr_humanize(canonical_addr)?` 4. Deserialize from JSON. This must only be done from JSON that was validated before such as a contract's state. `Addr` must not be used in messages sent by the user because this would result in unvalidated instances.\n\nThis type is immutable. If you really need to mutate it (Really? Are you sure?), create a mutable copy using `let mut mutable = Addr::to_string()` and operate on that `String` instance.",
+        "type": "string"
+      }
+    }
   },
   "execute": {
     "$schema": "http://json-schema.org/draft-07/schema#",
@@ -202,6 +210,34 @@
         "properties": {
           "reschedule_task": {
             "$ref": "#/definitions/TasksRescheduleTask"
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Pauses all operations for this contract, can only be done by pause_admin",
+        "type": "object",
+        "required": [
+          "pause_contract"
+        ],
+        "properties": {
+          "pause_contract": {
+            "type": "object",
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "unpauses all operations for this contract, can only be unpaused by owner_addr",
+        "type": "object",
+        "required": [
+          "unpause_contract"
+        ],
+        "properties": {
+          "unpause_contract": {
+            "type": "object",
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -1164,18 +1200,6 @@
             "format": "uint64",
             "minimum": 0.0
           },
-          "owner_addr": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "paused": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
           "slot_granularity_time": {
             "type": [
               "integer",
@@ -1414,6 +1438,20 @@
         ],
         "properties": {
           "config": {
+            "type": "object",
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Helper for query responses on versioned contracts",
+        "type": "object",
+        "required": [
+          "paused"
+        ],
+        "properties": {
+          "paused": {
             "type": "object",
             "additionalProperties": false
           }
@@ -1737,10 +1775,18 @@
       "AmountForOneTask": {
         "type": "object",
         "required": [
+          "agent_fee",
           "coin",
-          "gas"
+          "gas",
+          "gas_price",
+          "treasury_fee"
         ],
         "properties": {
+          "agent_fee": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
+          },
           "coin": {
             "type": "array",
             "items": {
@@ -1769,6 +1815,14 @@
           "gas": {
             "type": "integer",
             "format": "uint64",
+            "minimum": 0.0
+          },
+          "gas_price": {
+            "$ref": "#/definitions/GasPrice"
+          },
+          "treasury_fee": {
+            "type": "integer",
+            "format": "uint16",
             "minimum": 0.0
           }
         },
@@ -2135,6 +2189,34 @@
       "Empty": {
         "description": "An empty struct that serves as a placeholder in different places, such as contracts that don't set a custom message.\n\nIt is designed to be expressable in correct JSON and JSON Schema but contains no meaningful data. Previously we used enums without cases, but those cannot represented as valid JSON Schema (https://github.com/CosmWasm/cosmwasm/issues/451)",
         "type": "object"
+      },
+      "GasPrice": {
+        "description": "We can't store gas_price as floats inside cosmwasm so instead of having 0.04 we use GasPrice {4/100} and after that multiply Gas by `gas_adjustment` {150/100} (1.5)",
+        "type": "object",
+        "required": [
+          "denominator",
+          "gas_adjustment_numerator",
+          "numerator"
+        ],
+        "properties": {
+          "denominator": {
+            "description": "Denominator is shared",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "gas_adjustment_numerator": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "numerator": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          }
+        },
+        "additionalProperties": false
       },
       "GovMsg": {
         "description": "This message type allows the contract interact with the [x/gov] module in order to cast votes.\n\n[x/gov]: https://github.com/cosmos/cosmos-sdk/tree/v0.45.12/x/gov\n\n## Examples\n\nCast a simple vote:\n\n``` # use cosmwasm_std::{ #     HexBinary, #     Storage, Api, Querier, DepsMut, Deps, entry_point, Env, StdError, MessageInfo, #     Response, QueryResponse, # }; # type ExecuteMsg = (); use cosmwasm_std::{GovMsg, VoteOption};\n\n#[entry_point] pub fn execute( deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg, ) -> Result<Response, StdError> { // ... Ok(Response::new().add_message(GovMsg::Vote { proposal_id: 4, vote: VoteOption::Yes, })) } ```\n\nCast a weighted vote:\n\n``` # use cosmwasm_std::{ #     HexBinary, #     Storage, Api, Querier, DepsMut, Deps, entry_point, Env, StdError, MessageInfo, #     Response, QueryResponse, # }; # type ExecuteMsg = (); # #[cfg(feature = \"cosmwasm_1_2\")] use cosmwasm_std::{Decimal, GovMsg, VoteOption, WeightedVoteOption};\n\n# #[cfg(feature = \"cosmwasm_1_2\")] #[entry_point] pub fn execute( deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg, ) -> Result<Response, StdError> { // ... Ok(Response::new().add_message(GovMsg::VoteWeighted { proposal_id: 4, options: vec![ WeightedVoteOption { option: VoteOption::Yes, weight: Decimal::percent(65), }, WeightedVoteOption { option: VoteOption::Abstain, weight: Decimal::percent(35), }, ], })) } ```",
@@ -2819,7 +2901,7 @@
         "gas_limit",
         "gas_query_fee",
         "owner_addr",
-        "paused",
+        "pause_admin",
         "slot_granularity_time",
         "version"
       ],
@@ -2910,8 +2992,13 @@
             }
           ]
         },
-        "paused": {
-          "type": "boolean"
+        "pause_admin": {
+          "description": "A multisig admin whose sole responsibility is to pause the contract in event of emergency. Must be a different contract address than DAO, cannot be a regular keypair Does not have the ability to unpause, must rely on the DAO to assess the situation and act accordingly",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Addr"
+            }
+          ]
         },
         "slot_granularity_time": {
           "description": "Time in nanos for each bucket of tasks",
@@ -2983,10 +3070,18 @@
         "AmountForOneTask": {
           "type": "object",
           "required": [
+            "agent_fee",
             "coin",
-            "gas"
+            "gas",
+            "gas_price",
+            "treasury_fee"
           ],
           "properties": {
+            "agent_fee": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
             "coin": {
               "type": "array",
               "items": {
@@ -3015,6 +3110,14 @@
             "gas": {
               "type": "integer",
               "format": "uint64",
+              "minimum": 0.0
+            },
+            "gas_price": {
+              "$ref": "#/definitions/GasPrice"
+            },
+            "treasury_fee": {
+              "type": "integer",
+              "format": "uint16",
               "minimum": 0.0
             }
           },
@@ -3381,6 +3484,34 @@
         "Empty": {
           "description": "An empty struct that serves as a placeholder in different places, such as contracts that don't set a custom message.\n\nIt is designed to be expressable in correct JSON and JSON Schema but contains no meaningful data. Previously we used enums without cases, but those cannot represented as valid JSON Schema (https://github.com/CosmWasm/cosmwasm/issues/451)",
           "type": "object"
+        },
+        "GasPrice": {
+          "description": "We can't store gas_price as floats inside cosmwasm so instead of having 0.04 we use GasPrice {4/100} and after that multiply Gas by `gas_adjustment` {150/100} (1.5)",
+          "type": "object",
+          "required": [
+            "denominator",
+            "gas_adjustment_numerator",
+            "numerator"
+          ],
+          "properties": {
+            "denominator": {
+              "description": "Denominator is shared",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "gas_adjustment_numerator": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "numerator": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
         },
         "GovMsg": {
           "description": "This message type allows the contract interact with the [x/gov] module in order to cast votes.\n\n[x/gov]: https://github.com/cosmos/cosmos-sdk/tree/v0.45.12/x/gov\n\n## Examples\n\nCast a simple vote:\n\n``` # use cosmwasm_std::{ #     HexBinary, #     Storage, Api, Querier, DepsMut, Deps, entry_point, Env, StdError, MessageInfo, #     Response, QueryResponse, # }; # type ExecuteMsg = (); use cosmwasm_std::{GovMsg, VoteOption};\n\n#[entry_point] pub fn execute( deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg, ) -> Result<Response, StdError> { // ... Ok(Response::new().add_message(GovMsg::Vote { proposal_id: 4, vote: VoteOption::Yes, })) } ```\n\nCast a weighted vote:\n\n``` # use cosmwasm_std::{ #     HexBinary, #     Storage, Api, Querier, DepsMut, Deps, entry_point, Env, StdError, MessageInfo, #     Response, QueryResponse, # }; # type ExecuteMsg = (); # #[cfg(feature = \"cosmwasm_1_2\")] use cosmwasm_std::{Decimal, GovMsg, VoteOption, WeightedVoteOption};\n\n# #[cfg(feature = \"cosmwasm_1_2\")] #[entry_point] pub fn execute( deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg, ) -> Result<Response, StdError> { // ... Ok(Response::new().add_message(GovMsg::VoteWeighted { proposal_id: 4, options: vec![ WeightedVoteOption { option: VoteOption::Yes, weight: Decimal::percent(65), }, WeightedVoteOption { option: VoteOption::Abstain, weight: Decimal::percent(35), }, ], })) } ```",
@@ -4122,10 +4253,18 @@
         "AmountForOneTask": {
           "type": "object",
           "required": [
+            "agent_fee",
             "coin",
-            "gas"
+            "gas",
+            "gas_price",
+            "treasury_fee"
           ],
           "properties": {
+            "agent_fee": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
             "coin": {
               "type": "array",
               "items": {
@@ -4154,6 +4293,14 @@
             "gas": {
               "type": "integer",
               "format": "uint64",
+              "minimum": 0.0
+            },
+            "gas_price": {
+              "$ref": "#/definitions/GasPrice"
+            },
+            "treasury_fee": {
+              "type": "integer",
+              "format": "uint16",
               "minimum": 0.0
             }
           },
@@ -4520,6 +4667,34 @@
         "Empty": {
           "description": "An empty struct that serves as a placeholder in different places, such as contracts that don't set a custom message.\n\nIt is designed to be expressable in correct JSON and JSON Schema but contains no meaningful data. Previously we used enums without cases, but those cannot represented as valid JSON Schema (https://github.com/CosmWasm/cosmwasm/issues/451)",
           "type": "object"
+        },
+        "GasPrice": {
+          "description": "We can't store gas_price as floats inside cosmwasm so instead of having 0.04 we use GasPrice {4/100} and after that multiply Gas by `gas_adjustment` {150/100} (1.5)",
+          "type": "object",
+          "required": [
+            "denominator",
+            "gas_adjustment_numerator",
+            "numerator"
+          ],
+          "properties": {
+            "denominator": {
+              "description": "Denominator is shared",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "gas_adjustment_numerator": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "numerator": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
         },
         "GovMsg": {
           "description": "This message type allows the contract interact with the [x/gov] module in order to cast votes.\n\n[x/gov]: https://github.com/cosmos/cosmos-sdk/tree/v0.45.12/x/gov\n\n## Examples\n\nCast a simple vote:\n\n``` # use cosmwasm_std::{ #     HexBinary, #     Storage, Api, Querier, DepsMut, Deps, entry_point, Env, StdError, MessageInfo, #     Response, QueryResponse, # }; # type ExecuteMsg = (); use cosmwasm_std::{GovMsg, VoteOption};\n\n#[entry_point] pub fn execute( deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg, ) -> Result<Response, StdError> { // ... Ok(Response::new().add_message(GovMsg::Vote { proposal_id: 4, vote: VoteOption::Yes, })) } ```\n\nCast a weighted vote:\n\n``` # use cosmwasm_std::{ #     HexBinary, #     Storage, Api, Querier, DepsMut, Deps, entry_point, Env, StdError, MessageInfo, #     Response, QueryResponse, # }; # type ExecuteMsg = (); # #[cfg(feature = \"cosmwasm_1_2\")] use cosmwasm_std::{Decimal, GovMsg, VoteOption, WeightedVoteOption};\n\n# #[cfg(feature = \"cosmwasm_1_2\")] #[entry_point] pub fn execute( deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg, ) -> Result<Response, StdError> { // ... Ok(Response::new().add_message(GovMsg::VoteWeighted { proposal_id: 4, options: vec![ WeightedVoteOption { option: VoteOption::Yes, weight: Decimal::percent(65), }, WeightedVoteOption { option: VoteOption::Abstain, weight: Decimal::percent(35), }, ], })) } ```",
@@ -5180,6 +5355,11 @@
         }
       }
     },
+    "paused": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Boolean",
+      "type": "boolean"
+    },
     "slot_hashes": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "SlotHashesResponse",
@@ -5295,10 +5475,18 @@
         "AmountForOneTask": {
           "type": "object",
           "required": [
+            "agent_fee",
             "coin",
-            "gas"
+            "gas",
+            "gas_price",
+            "treasury_fee"
           ],
           "properties": {
+            "agent_fee": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
             "coin": {
               "type": "array",
               "items": {
@@ -5327,6 +5515,14 @@
             "gas": {
               "type": "integer",
               "format": "uint64",
+              "minimum": 0.0
+            },
+            "gas_price": {
+              "$ref": "#/definitions/GasPrice"
+            },
+            "treasury_fee": {
+              "type": "integer",
+              "format": "uint16",
               "minimum": 0.0
             }
           },
@@ -5693,6 +5889,34 @@
         "Empty": {
           "description": "An empty struct that serves as a placeholder in different places, such as contracts that don't set a custom message.\n\nIt is designed to be expressable in correct JSON and JSON Schema but contains no meaningful data. Previously we used enums without cases, but those cannot represented as valid JSON Schema (https://github.com/CosmWasm/cosmwasm/issues/451)",
           "type": "object"
+        },
+        "GasPrice": {
+          "description": "We can't store gas_price as floats inside cosmwasm so instead of having 0.04 we use GasPrice {4/100} and after that multiply Gas by `gas_adjustment` {150/100} (1.5)",
+          "type": "object",
+          "required": [
+            "denominator",
+            "gas_adjustment_numerator",
+            "numerator"
+          ],
+          "properties": {
+            "denominator": {
+              "description": "Denominator is shared",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "gas_adjustment_numerator": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "numerator": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
         },
         "GovMsg": {
           "description": "This message type allows the contract interact with the [x/gov] module in order to cast votes.\n\n[x/gov]: https://github.com/cosmos/cosmos-sdk/tree/v0.45.12/x/gov\n\n## Examples\n\nCast a simple vote:\n\n``` # use cosmwasm_std::{ #     HexBinary, #     Storage, Api, Querier, DepsMut, Deps, entry_point, Env, StdError, MessageInfo, #     Response, QueryResponse, # }; # type ExecuteMsg = (); use cosmwasm_std::{GovMsg, VoteOption};\n\n#[entry_point] pub fn execute( deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg, ) -> Result<Response, StdError> { // ... Ok(Response::new().add_message(GovMsg::Vote { proposal_id: 4, vote: VoteOption::Yes, })) } ```\n\nCast a weighted vote:\n\n``` # use cosmwasm_std::{ #     HexBinary, #     Storage, Api, Querier, DepsMut, Deps, entry_point, Env, StdError, MessageInfo, #     Response, QueryResponse, # }; # type ExecuteMsg = (); # #[cfg(feature = \"cosmwasm_1_2\")] use cosmwasm_std::{Decimal, GovMsg, VoteOption, WeightedVoteOption};\n\n# #[cfg(feature = \"cosmwasm_1_2\")] #[entry_point] pub fn execute( deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg, ) -> Result<Response, StdError> { // ... Ok(Response::new().add_message(GovMsg::VoteWeighted { proposal_id: 4, options: vec![ WeightedVoteOption { option: VoteOption::Yes, weight: Decimal::percent(65), }, WeightedVoteOption { option: VoteOption::Abstain, weight: Decimal::percent(35), }, ], })) } ```",
@@ -6399,10 +6623,18 @@
         "AmountForOneTask": {
           "type": "object",
           "required": [
+            "agent_fee",
             "coin",
-            "gas"
+            "gas",
+            "gas_price",
+            "treasury_fee"
           ],
           "properties": {
+            "agent_fee": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
             "coin": {
               "type": "array",
               "items": {
@@ -6431,6 +6663,14 @@
             "gas": {
               "type": "integer",
               "format": "uint64",
+              "minimum": 0.0
+            },
+            "gas_price": {
+              "$ref": "#/definitions/GasPrice"
+            },
+            "treasury_fee": {
+              "type": "integer",
+              "format": "uint16",
               "minimum": 0.0
             }
           },
@@ -6797,6 +7037,34 @@
         "Empty": {
           "description": "An empty struct that serves as a placeholder in different places, such as contracts that don't set a custom message.\n\nIt is designed to be expressable in correct JSON and JSON Schema but contains no meaningful data. Previously we used enums without cases, but those cannot represented as valid JSON Schema (https://github.com/CosmWasm/cosmwasm/issues/451)",
           "type": "object"
+        },
+        "GasPrice": {
+          "description": "We can't store gas_price as floats inside cosmwasm so instead of having 0.04 we use GasPrice {4/100} and after that multiply Gas by `gas_adjustment` {150/100} (1.5)",
+          "type": "object",
+          "required": [
+            "denominator",
+            "gas_adjustment_numerator",
+            "numerator"
+          ],
+          "properties": {
+            "denominator": {
+              "description": "Denominator is shared",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "gas_adjustment_numerator": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "numerator": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
         },
         "GovMsg": {
           "description": "This message type allows the contract interact with the [x/gov] module in order to cast votes.\n\n[x/gov]: https://github.com/cosmos/cosmos-sdk/tree/v0.45.12/x/gov\n\n## Examples\n\nCast a simple vote:\n\n``` # use cosmwasm_std::{ #     HexBinary, #     Storage, Api, Querier, DepsMut, Deps, entry_point, Env, StdError, MessageInfo, #     Response, QueryResponse, # }; # type ExecuteMsg = (); use cosmwasm_std::{GovMsg, VoteOption};\n\n#[entry_point] pub fn execute( deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg, ) -> Result<Response, StdError> { // ... Ok(Response::new().add_message(GovMsg::Vote { proposal_id: 4, vote: VoteOption::Yes, })) } ```\n\nCast a weighted vote:\n\n``` # use cosmwasm_std::{ #     HexBinary, #     Storage, Api, Querier, DepsMut, Deps, entry_point, Env, StdError, MessageInfo, #     Response, QueryResponse, # }; # type ExecuteMsg = (); # #[cfg(feature = \"cosmwasm_1_2\")] use cosmwasm_std::{Decimal, GovMsg, VoteOption, WeightedVoteOption};\n\n# #[cfg(feature = \"cosmwasm_1_2\")] #[entry_point] pub fn execute( deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg, ) -> Result<Response, StdError> { // ... Ok(Response::new().add_message(GovMsg::VoteWeighted { proposal_id: 4, options: vec![ WeightedVoteOption { option: VoteOption::Yes, weight: Decimal::percent(65), }, WeightedVoteOption { option: VoteOption::Abstain, weight: Decimal::percent(35), }, ], })) } ```",
@@ -7459,10 +7727,10 @@
     },
     "tasks_by_owner": {
       "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "Array_of_TaskResponse",
+      "title": "Array_of_TaskInfo",
       "type": "array",
       "items": {
-        "$ref": "#/definitions/TaskResponse"
+        "$ref": "#/definitions/TaskInfo"
       },
       "definitions": {
         "Action_for_Empty": {
@@ -7498,10 +7766,18 @@
         "AmountForOneTask": {
           "type": "object",
           "required": [
+            "agent_fee",
             "coin",
-            "gas"
+            "gas",
+            "gas_price",
+            "treasury_fee"
           ],
           "properties": {
+            "agent_fee": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
             "coin": {
               "type": "array",
               "items": {
@@ -7530,6 +7806,14 @@
             "gas": {
               "type": "integer",
               "format": "uint64",
+              "minimum": 0.0
+            },
+            "gas_price": {
+              "$ref": "#/definitions/GasPrice"
+            },
+            "treasury_fee": {
+              "type": "integer",
+              "format": "uint16",
               "minimum": 0.0
             }
           },
@@ -7896,6 +8180,34 @@
         "Empty": {
           "description": "An empty struct that serves as a placeholder in different places, such as contracts that don't set a custom message.\n\nIt is designed to be expressable in correct JSON and JSON Schema but contains no meaningful data. Previously we used enums without cases, but those cannot represented as valid JSON Schema (https://github.com/CosmWasm/cosmwasm/issues/451)",
           "type": "object"
+        },
+        "GasPrice": {
+          "description": "We can't store gas_price as floats inside cosmwasm so instead of having 0.04 we use GasPrice {4/100} and after that multiply Gas by `gas_adjustment` {150/100} (1.5)",
+          "type": "object",
+          "required": [
+            "denominator",
+            "gas_adjustment_numerator",
+            "numerator"
+          ],
+          "properties": {
+            "denominator": {
+              "description": "Denominator is shared",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "gas_adjustment_numerator": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "numerator": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
         },
         "GovMsg": {
           "description": "This message type allows the contract interact with the [x/gov] module in order to cast votes.\n\n[x/gov]: https://github.com/cosmos/cosmos-sdk/tree/v0.45.12/x/gov\n\n## Examples\n\nCast a simple vote:\n\n``` # use cosmwasm_std::{ #     HexBinary, #     Storage, Api, Querier, DepsMut, Deps, entry_point, Env, StdError, MessageInfo, #     Response, QueryResponse, # }; # type ExecuteMsg = (); use cosmwasm_std::{GovMsg, VoteOption};\n\n#[entry_point] pub fn execute( deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg, ) -> Result<Response, StdError> { // ... Ok(Response::new().add_message(GovMsg::Vote { proposal_id: 4, vote: VoteOption::Yes, })) } ```\n\nCast a weighted vote:\n\n``` # use cosmwasm_std::{ #     HexBinary, #     Storage, Api, Querier, DepsMut, Deps, entry_point, Env, StdError, MessageInfo, #     Response, QueryResponse, # }; # type ExecuteMsg = (); # #[cfg(feature = \"cosmwasm_1_2\")] use cosmwasm_std::{Decimal, GovMsg, VoteOption, WeightedVoteOption};\n\n# #[cfg(feature = \"cosmwasm_1_2\")] #[entry_point] pub fn execute( deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg, ) -> Result<Response, StdError> { // ... Ok(Response::new().add_message(GovMsg::VoteWeighted { proposal_id: 4, options: vec![ WeightedVoteOption { option: VoteOption::Yes, weight: Decimal::percent(65), }, WeightedVoteOption { option: VoteOption::Abstain, weight: Decimal::percent(35), }, ], })) } ```",
@@ -8279,22 +8591,6 @@
             },
             "version": {
               "type": "string"
-            }
-          },
-          "additionalProperties": false
-        },
-        "TaskResponse": {
-          "type": "object",
-          "properties": {
-            "task": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/TaskInfo"
-                },
-                {
-                  "type": "null"
-                }
-              ]
             }
           },
           "additionalProperties": false

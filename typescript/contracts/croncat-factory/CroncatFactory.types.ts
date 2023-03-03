@@ -8,10 +8,6 @@ export interface InstantiateMsg {
   owner_addr?: string | null;
 }
 export type ExecuteMsg = {
-  update_config: {
-    owner_addr: string;
-  };
-} | {
   deploy: {
     kind: VersionKind;
     module_instantiate_info: ModuleInstantiateInfo;
@@ -32,6 +28,14 @@ export type ExecuteMsg = {
   proxy: {
     msg: WasmMsg;
   };
+} | {
+  nominate_owner: {
+    nominated_owner_addr: string;
+  };
+} | {
+  accept_nominate_owner: {};
+} | {
+  remove_nominate_owner: {};
 };
 export type VersionKind = "library" | "manager" | "tasks" | "agents";
 export type Binary = string;
@@ -128,6 +132,7 @@ export interface ContractMetadataInfo {
   version: [number, number];
 }
 export interface Config {
+  nominated_owner_addr?: Addr | null;
   owner_addr: Addr;
 }
 export type ArrayOfString = string[];

@@ -1,6 +1,6 @@
 {
   "contract_name": "croncat-factory",
-  "contract_version": "0.1.0",
+  "contract_version": "0.1.1",
   "idl_version": "1.0.0",
   "instantiate": {
     "$schema": "http://json-schema.org/draft-07/schema#",
@@ -8,7 +8,7 @@
     "type": "object",
     "properties": {
       "owner_addr": {
-        "description": "Owner address of the contract Only owner can execute messages in this contract If no owner_addr is passed sender will be used as owner address",
+        "description": "Owner address of the contract, CronCat DAO will be the owner since it deploys the factory Only owner can execute messages in this contract If no owner_addr is passed sender will be used as owner address",
         "type": [
           "string",
           "null"
@@ -21,28 +21,6 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "ExecuteMsg",
     "oneOf": [
-      {
-        "description": "Updates the factory config",
-        "type": "object",
-        "required": [
-          "update_config"
-        ],
-        "properties": {
-          "update_config": {
-            "type": "object",
-            "required": [
-              "owner_addr"
-            ],
-            "properties": {
-              "owner_addr": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "additionalProperties": false
-      },
       {
         "description": "Deploys contract and saves metadata of the contract to the factory",
         "type": "object",
@@ -148,6 +126,7 @@
         "additionalProperties": false
       },
       {
+        "description": "Pass through execution for versioned contract calls",
         "type": "object",
         "required": [
           "proxy"
@@ -163,6 +142,56 @@
                 "$ref": "#/definitions/WasmMsg"
               }
             },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Factory owner (DAO) may submit a new owner to transfer ownership",
+        "type": "object",
+        "required": [
+          "nominate_owner"
+        ],
+        "properties": {
+          "nominate_owner": {
+            "type": "object",
+            "required": [
+              "nominated_owner_addr"
+            ],
+            "properties": {
+              "nominated_owner_addr": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "The nominated address must accept a nomination to finalize transfer of ownership NOTE: This is the only method that can be called, that isn't from current owner_addr",
+        "type": "object",
+        "required": [
+          "accept_nominate_owner"
+        ],
+        "properties": {
+          "accept_nominate_owner": {
+            "type": "object",
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Factory owner (DAO) may revoke any/all ownership nominations at any time.",
+        "type": "object",
+        "required": [
+          "remove_nominate_owner"
+        ],
+        "properties": {
+          "remove_nominate_owner": {
+            "type": "object",
             "additionalProperties": false
           }
         },
@@ -706,8 +735,24 @@
         "owner_addr"
       ],
       "properties": {
+        "nominated_owner_addr": {
+          "description": "Default empty, nominated owners must accept the nomination for ownership transfer to be safely completed.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Addr"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "owner_addr": {
-          "$ref": "#/definitions/Addr"
+          "description": "The owner of the Factory, the DAO responsible for all changes & usage All Execute methods are restricted to this address, the CronCat DAO",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Addr"
+            }
+          ]
         }
       },
       "additionalProperties": false,

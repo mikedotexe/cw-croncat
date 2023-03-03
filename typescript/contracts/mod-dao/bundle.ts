@@ -4,10 +4,10 @@
 * and run the @cosmwasm/ts-codegen generate command to regenerate this file.
 */
 
-import * as _8 from "./ModDao.types";
-import * as _9 from "./ModDao.client";
+import * as _6 from "./ModDao.types";
+import * as _7 from "./ModDao.client";
 export namespace contracts {
-  export const ModDao = { ..._8,
-    ..._9
+  export const ModDao = { ..._6,
+    ..._7
   };
 }

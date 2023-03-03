@@ -232,11 +232,12 @@ dependencies = [
 
 [[package]]
 name = "croncat-agents"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "cosmwasm-schema",
  "cosmwasm-std",
+ "croncat-agents",
  "croncat-factory",
  "croncat-manager",
  "croncat-sdk-agents",
@@ -255,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "croncat-factory"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "cosmwasm-schema",
@@ -263,6 +264,7 @@ dependencies = [
  "croncat-agents",
  "croncat-manager",
  "croncat-mod-balances",
+ "croncat-sdk-core",
  "croncat-sdk-factory",
  "croncat-sdk-manager",
  "croncat-tasks",
@@ -277,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "croncat-manager"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -298,14 +300,14 @@ dependencies = [
  "cw2 1.0.1",
  "cw20 0.16.0",
  "cw20-base 0.16.0",
- "mod-sdk 0.1.0",
+ "mod-sdk 0.1.1",
  "serde-json-wasm",
  "thiserror",
 ]
 
 [[package]]
 name = "croncat-mod-balances"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -314,12 +316,12 @@ dependencies = [
  "cw2 1.0.1",
  "cw20 0.16.0",
  "cw20-base 0.16.0",
- "mod-sdk 0.1.0",
+ "mod-sdk 0.1.1",
 ]
 
 [[package]]
 name = "croncat-mod-dao"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -335,14 +337,14 @@ dependencies = [
  "dao-proposal-single",
  "dao-voting",
  "dao-voting-cw20-staked",
- "mod-sdk 0.1.0",
+ "mod-sdk 0.1.1",
  "schemars",
  "serde",
 ]
 
 [[package]]
 name = "croncat-mod-generic"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -352,7 +354,7 @@ dependencies = [
  "cw20-base 0.16.0",
  "cw4",
  "cw4-group",
- "mod-sdk 0.1.0",
+ "mod-sdk 0.1.1",
  "serde-cw-value",
  "serde_json",
 ]
@@ -367,12 +369,12 @@ dependencies = [
  "cw2 1.0.1",
  "cw721 0.16.0",
  "cw721-base",
- "mod-sdk 0.1.0",
+ "mod-sdk 0.1.1",
 ]
 
 [[package]]
 name = "croncat-sdk-agents"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -383,16 +385,17 @@ dependencies = [
 
 [[package]]
 name = "croncat-sdk-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
  "cw20 0.16.0",
+ "thiserror",
 ]
 
 [[package]]
 name = "croncat-sdk-factory"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -401,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "croncat-sdk-manager"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -412,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "croncat-sdk-tasks"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -421,13 +424,13 @@ dependencies = [
  "croncat-sdk-core",
  "cw20 0.16.0",
  "hex",
- "mod-sdk 0.1.0",
+ "mod-sdk 0.1.1",
  "sha2 0.10.6",
 ]
 
 [[package]]
 name = "croncat-tasks"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "cosmwasm-schema",
@@ -435,6 +438,7 @@ dependencies = [
  "croncat-agents",
  "croncat-factory",
  "croncat-manager",
+ "croncat-mod-balances",
  "croncat-sdk-agents",
  "croncat-sdk-core",
  "croncat-sdk-factory",
@@ -499,7 +503,7 @@ dependencies = [
  "cosmwasm-std",
  "cw-storage-plus 0.16.0",
  "cw2 0.16.0",
- "mod-sdk 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mod-sdk 0.1.0",
  "schemars",
  "thiserror",
 ]
@@ -1514,6 +1518,8 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 [[package]]
 name = "mod-sdk"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3ddc8342bb738b9b61be88d62bd825de3081be855ed41781afc5c75c0b86de2"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -1522,9 +1528,7 @@ dependencies = [
 
 [[package]]
 name = "mod-sdk"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3ddc8342bb738b9b61be88d62bd825de3081be855ed41781afc5c75c0b86de2"
+version = "0.1.1"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",

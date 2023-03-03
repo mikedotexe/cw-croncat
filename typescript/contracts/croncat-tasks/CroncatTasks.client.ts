@@ -6,10 +6,11 @@
 
 import { CosmWasmClient, SigningCosmWasmClient, ExecuteResult } from "@cosmjs/cosmwasm-stargate";
 import { StdFee } from "@cosmjs/amino";
-import { InstantiateMsg, ExecuteMsg, CosmosMsgForEmpty, BankMsg, Uint128, StakingMsg, DistributionMsg, Binary, IbcMsg, Timestamp, Uint64, WasmMsg, GovMsg, VoteOption, Boundary, Interval, ValueIndex, PathToValue, UpdateConfigMsg, TaskRequest, ActionForEmpty, Coin, Empty, IbcTimeout, IbcTimeoutBlock, BoundaryHeight, BoundaryTime, Cw20Coin, CroncatQuery, Transform, TasksRemoveTaskByManager, TasksRescheduleTask, QueryMsg, Addr, Task, AmountForOneTask, Cw20CoinVerified, Config, TaskResponse, TaskInfo, CurrentTaskInfoResponse, ArrayOfString, ArrayOfTaskInfo, SlotHashesResponse, SlotTasksTotalResponse, String, ArrayOfTaskResponse } from "./CroncatTasks.types";
+import { Addr, InstantiateMsg, ExecuteMsg, CosmosMsgForEmpty, BankMsg, Uint128, StakingMsg, DistributionMsg, Binary, IbcMsg, Timestamp, Uint64, WasmMsg, GovMsg, VoteOption, Boundary, Interval, ValueIndex, PathToValue, UpdateConfigMsg, TaskRequest, ActionForEmpty, Coin, Empty, IbcTimeout, IbcTimeoutBlock, BoundaryHeight, BoundaryTime, Cw20Coin, CroncatQuery, Transform, TasksRemoveTaskByManager, TasksRescheduleTask, QueryMsg, Task, AmountForOneTask, Cw20CoinVerified, GasPrice, Config, TaskResponse, TaskInfo, CurrentTaskInfoResponse, ArrayOfString, ArrayOfTaskInfo, Boolean, SlotHashesResponse, SlotTasksTotalResponse, String } from "./CroncatTasks.types";
 export interface CroncatTasksReadOnlyInterface {
   contractAddress: string;
   config: () => Promise<Config>;
+  paused: () => Promise<Boolean>;
   tasksTotal: () => Promise<Uint64>;
   currentTaskInfo: () => Promise<CurrentTaskInfoResponse>;
   currentTask: () => Promise<TaskResponse>;
@@ -51,7 +52,7 @@ export interface CroncatTasksReadOnlyInterface {
     fromIndex?: number;
     limit?: number;
     ownerAddr: string;
-  }) => Promise<ArrayOfTaskResponse>;
+  }) => Promise<ArrayOfTaskInfo>;
   taskHash: ({
     task
   }: {
@@ -76,6 +77,7 @@ export class CroncatTasksQueryClient implements CroncatTasksReadOnlyInterface {
     this.client = client;
     this.contractAddress = contractAddress;
     this.config = this.config.bind(this);
+    this.paused = this.paused.bind(this);
     this.tasksTotal = this.tasksTotal.bind(this);
     this.currentTaskInfo = this.currentTaskInfo.bind(this);
     this.currentTask = this.currentTask.bind(this);
@@ -92,6 +94,11 @@ export class CroncatTasksQueryClient implements CroncatTasksReadOnlyInterface {
   config = async (): Promise<Config> => {
     return this.client.queryContractSmart(this.contractAddress, {
       config: {}
+    });
+  };
+  paused = async (): Promise<Boolean> => {
+    return this.client.queryContractSmart(this.contractAddress, {
+      paused: {}
     });
   };
   tasksTotal = async (): Promise<Uint64> => {
@@ -176,7 +183,7 @@ export class CroncatTasksQueryClient implements CroncatTasksReadOnlyInterface {
     fromIndex?: number;
     limit?: number;
     ownerAddr: string;
-  }): Promise<ArrayOfTaskResponse> => {
+  }): Promise<ArrayOfTaskInfo> => {
     return this.client.queryContractSmart(this.contractAddress, {
       tasks_by_owner: {
         from_index: fromIndex,
@@ -230,8 +237,6 @@ export interface CroncatTasksInterface extends CroncatTasksReadOnlyInterface {
     gasBaseFee,
     gasLimit,
     gasQueryFee,
-    ownerAddr,
-    paused,
     slotGranularityTime
   }: {
     croncatAgentsKey?: string[][];
@@ -241,8 +246,6 @@ export interface CroncatTasksInterface extends CroncatTasksReadOnlyInterface {
     gasBaseFee?: number;
     gasLimit?: number;
     gasQueryFee?: number;
-    ownerAddr?: string;
-    paused?: boolean;
     slotGranularityTime?: number;
   }, fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
   createTask: ({
@@ -265,6 +268,8 @@ export interface CroncatTasksInterface extends CroncatTasksReadOnlyInterface {
   }: {
     taskHash: number[];
   }, fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
+  pauseContract: (fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
+  unpauseContract: (fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
 }
 export class CroncatTasksClient extends CroncatTasksQueryClient implements CroncatTasksInterface {
   client: SigningCosmWasmClient;
@@ -281,6 +286,8 @@ export class CroncatTasksClient extends CroncatTasksQueryClient implements Cronc
     this.removeTask = this.removeTask.bind(this);
     this.removeTaskByManager = this.removeTaskByManager.bind(this);
     this.rescheduleTask = this.rescheduleTask.bind(this);
+    this.pauseContract = this.pauseContract.bind(this);
+    this.unpauseContract = this.unpauseContract.bind(this);
   }
 
   updateConfig = async ({
@@ -291,8 +298,6 @@ export class CroncatTasksClient extends CroncatTasksQueryClient implements Cronc
     gasBaseFee,
     gasLimit,
     gasQueryFee,
-    ownerAddr,
-    paused,
     slotGranularityTime
   }: {
     croncatAgentsKey?: string[][];
@@ -302,8 +307,6 @@ export class CroncatTasksClient extends CroncatTasksQueryClient implements Cronc
     gasBaseFee?: number;
     gasLimit?: number;
     gasQueryFee?: number;
-    ownerAddr?: string;
-    paused?: boolean;
     slotGranularityTime?: number;
   }, fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
     return await this.client.execute(this.sender, this.contractAddress, {
@@ -315,8 +318,6 @@ export class CroncatTasksClient extends CroncatTasksQueryClient implements Cronc
         gas_base_fee: gasBaseFee,
         gas_limit: gasLimit,
         gas_query_fee: gasQueryFee,
-        owner_addr: ownerAddr,
-        paused,
         slot_granularity_time: slotGranularityTime
       }
     }, fee, memo, funds);
@@ -363,6 +364,16 @@ export class CroncatTasksClient extends CroncatTasksQueryClient implements Cronc
       reschedule_task: {
         task_hash: taskHash
       }
+    }, fee, memo, funds);
+  };
+  pauseContract = async (fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
+    return await this.client.execute(this.sender, this.contractAddress, {
+      pause_contract: {}
+    }, fee, memo, funds);
+  };
+  unpauseContract = async (fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
+    return await this.client.execute(this.sender, this.contractAddress, {
+      unpause_contract: {}
     }, fee, memo, funds);
   };
 }
