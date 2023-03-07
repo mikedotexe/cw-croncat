@@ -131,13 +131,18 @@ pub fn execute(
 }
 
 fn execute_proxy(deps: DepsMut, msg: WasmMsg) -> Result<Response, ContractError> {
-    // Only accept WasmMsg::Execute
-    let contract_addr = match &msg {
+    // Only accept WasmMsg::Execute && WasmMsg::Migrate
+    let (contract_addr, action) = match &msg {
         WasmMsg::Execute {
             contract_addr,
             funds: _,
             msg: _,
-        } => contract_addr,
+        } => (contract_addr, "execute"),
+        WasmMsg::Migrate {
+            contract_addr,
+            new_code_id: _,
+            msg: _,
+        } => (contract_addr, "migrate"),
         // Disallow unknown messages
         _ => {
             return Err(ContractError::UnknownMethod {});
@@ -151,6 +156,7 @@ fn execute_proxy(deps: DepsMut, msg: WasmMsg) -> Result<Response, ContractError>
 
     Ok(Response::new()
         .add_attribute("action", "proxy")
+        .add_attribute("action", action)
         .add_message(msg))
 }
 

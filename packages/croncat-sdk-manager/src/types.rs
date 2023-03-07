@@ -285,11 +285,6 @@ mod test {
             cw20_balance: Some(cw20.clone()),
             ibc_balance: Some(ibc_coin.clone()),
         };
-        // TODO:
-        println!(
-            "HHHHHHHH = {:?}",
-            task_balance.verify_enough_attached(Uint128::from(100u64), None, None, false, "denom")
-        );
         // We're now validating you're not adding tokens that never get used, #noMoreBlackHoles
         assert!(task_balance
             .verify_enough_attached(Uint128::from(100u64), None, None, false, "denom")

@@ -1,4 +1,4 @@
-import { ExecuteResult, SigningCosmWasmClient } from "@cosmjs/cosmwasm-stargate";
+import { ExecuteResult, SigningCosmWasmClient, toBinary } from "@cosmjs/cosmwasm-stargate";
 import { QueryClient } from "@cosmjs/stargate";
 import { GasPrice, StdFee, calculateFee } from "@cosmjs/stargate";
 import * as fs from "fs"
@@ -18,7 +18,12 @@ export class FactoryClient {
     this.querier = querier;
 	}
 
-	async deploy(artifactsRoot: string, sender: string, uploadGas: StdFee, executeGas: StdFee): Promise<[number, string]> {
+	async deploy(
+    artifactsRoot: string,
+    sender: string,
+    uploadGas: StdFee,
+    executeGas: StdFee
+  ): Promise<[number, string]> {
 		const wasm = fs.readFileSync(`${artifactsRoot}/croncat_factory.wasm`)
 		const uploadRes = await this.client.upload(sender, wasm, uploadGas)
 		const codeId = uploadRes.codeId
@@ -66,6 +71,56 @@ export class FactoryClient {
   async getAllEntries(contractAddr: string): Promise<any> {
     const q = { all_entries: {} };
     const response = await this.querier.wasm.queryContractSmart(contractAddr, q);
+    return response;
+  }
+
+  async doProxyCall(
+    sender: string,
+    factoryAddr: string,
+    contractAddr: string,
+    sub_msg: any,
+    gas: StdFee,
+    funds: any,
+  ): Promise<ExecuteResult> {
+    const proxy_msg = {
+      proxy: {
+        msg: {
+          execute: {
+            contract_addr: contractAddr || '',
+            msg: toBinary(sub_msg),
+            funds: funds || [],
+          }
+        },
+      }
+    };
+    const response = await this.client.execute(sender, factoryAddr, proxy_msg, gas, null, funds);
+    return response;
+  }
+
+  async addWhitelistedAgent(
+    sender: string,
+    contractAddr: string,
+    agentContractAddr: string,
+    agentAddr: string,
+    gas: StdFee
+  ): Promise<ExecuteResult> {
+    const proxy_sub_msg = {
+      execute: {
+        contract_addr: agentContractAddr || '',
+        msg: toBinary({
+          add_agent_to_whitelist: {
+            agent_address: agentAddr || ''
+          }
+        }),
+        funds: [],
+      }
+    }
+    const proxy_msg = {
+      proxy: {
+        msg: proxy_sub_msg,
+      }
+    };
+    const response = await this.client.execute(sender, contractAddr, proxy_msg, gas);
     return response;
   }
 }

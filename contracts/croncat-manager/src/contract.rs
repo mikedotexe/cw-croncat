@@ -78,7 +78,7 @@ pub fn instantiate(
     // MUST: not be same address as factory owner (DAO)
     // Any factory action should be done by the owner_addr
     let pause_addr = deps.api.addr_validate(pause_admin.as_str())?;
-    if owner_addr == pause_addr || pause_addr.to_string().len() != 63 {
+    if owner_addr == pause_addr || !(63usize..=64usize).contains(&pause_addr.to_string().len()) {
         return Err(ContractError::InvalidPauseAdmin {});
     }
 

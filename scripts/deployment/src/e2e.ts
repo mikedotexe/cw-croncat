@@ -18,6 +18,9 @@ config({ path: '.env' })
 const seedPhrase: string = process.env.SEED_PHRASE
 const prefix: string = process.env.PREFIX
 const endpoint: string = process.env.RPC_ENDPOINT
+// NOTE: MUST Be a contract wallet - multisig prefered!
+// If you need one, go to https://github.com/CosmWasm/cw-plus/tree/main/contracts/cw3-fixed-multisig, compile, instantiate & get deployed address.
+const pauseAdminAddress: string = process.env.PAUSE_ADMIN_MULTISIG || ''
 const denom: string = process.env.DENOM
 const defaultGasPrice = GasPrice.fromString(`0.025${denom}`)
 const artifactsRoot = `${process.cwd()}/../../artifacts`
@@ -34,11 +37,26 @@ const start = async () => {
 			// for easier coinage management
 			stringToPath(`m/44'/118'/0'/0/0`),
 			stringToPath(`m/44'/118'/0'/0/1`),
+			stringToPath(`m/44'/118'/0'/0/2`),
+			stringToPath(`m/44'/118'/0'/0/3`),
+			stringToPath(`m/44'/118'/0'/0/4`),
 		]
 	})
 	const accts = await signerWallet.getAccounts()
 	const userAddress = accts[0].address
 	const agent2Address = accts[1].address
+	const agent3Address = accts[2].address
+	const agent4Address = accts[3].address
+	const treasuryAddress = accts[4].address
+	console.table({
+		userAddress,
+		agent2Address,
+		agent3Address,
+		agent4Address,
+		treasuryAddress,
+		pauseAdminAddress,
+	});
+
 	const cwClient = await SigningCosmWasmClient.connectWithSigner(endpoint, signerWallet, { prefix, gasPrice: defaultGasPrice })
 	const httpBatchClient = new HttpBatchClient(endpoint, {
 			batchSizeLimit: 2,
@@ -71,30 +89,31 @@ const start = async () => {
 	})
 	// console.log('factory allVersions', JSON.stringify(allVersions));
 
-	const task1 = {
-		"actions": [
-			{
-				"msg": {
-					"wasm": {
-						"execute": {
-							"contract_addr": versions.manager.contract_addr,
-							"msg": Buffer.from(JSON.stringify({ "tick": {} })).toString('base64'),
-							"funds": []
-						}
-					}
-				},
-				"gas_limit": 75000
-			}
-		],
-		"boundary": null,
-		"cw20": null,
-		"interval": {
-			"block": 1
-		},
-		"stop_on_fail": true,
-		"queries": null,
-		"transforms": null
-	}
+	// TODO: Replace with better example
+	// const task1 = {
+	// 	"actions": [
+	// 		{
+	// 			"msg": {
+	// 				"wasm": {
+	// 					"execute": {
+	// 						"contract_addr": versions.manager.contract_addr,
+	// 						"msg": Buffer.from(JSON.stringify({ "tick": {} })).toString('base64'),
+	// 						"funds": []
+	// 					}
+	// 				}
+	// 			},
+	// 			"gas_limit": 75000
+	// 		}
+	// 	],
+	// 	"boundary": null,
+	// 	"cw20": null,
+	// 	"interval": {
+	// 		"block": 1
+	// 	},
+	// 	"stop_on_fail": true,
+	// 	"queries": null,
+	// 	"transforms": null
+	// }
 	const task2 = (amount: number) => ({
 		"actions": [
 			{
@@ -119,6 +138,49 @@ const start = async () => {
 		"transforms": null
 	})
 
+	const factoryTask1 = {
+		"create_task": {
+			"task": {
+				"actions": [
+					{
+						"msg": {
+							"wasm": {
+								"execute": {
+									"contract_addr": versions.agents.contract_addr,
+									"msg": Buffer.from(JSON.stringify({ "tick": {} })).toString('base64'),
+									"funds": []
+								}
+							}
+						},
+						"gas_limit": 75000
+					}
+				],
+				"boundary": null,
+				"cw20": null,
+				"interval": {
+					"block": 1
+				},
+				"stop_on_fail": true,
+				"queries": null,
+				"transforms": null
+			}
+		}
+	}
+
+	// Add first agent Register & check status
+	try {
+		const r = await factoryClient.addWhitelistedAgent(
+			userAddress,
+			contracts.factory.address,
+			versions.agents.contract_addr,
+			userAddress,
+			executeGas
+		);
+		console.info(`Agents Add to Whitelist SUCCESS\n`, JSON.stringify(r), '\n')
+	} catch (e) {
+		console.info(`Agents Add to Whitelist ERROR`, e)
+	}
+
 	// Register & check status
 	try {
 		const r = await agentClient.register(userAddress, versions.agents.contract_addr, executeGas);
@@ -134,13 +196,27 @@ const start = async () => {
 		console.info(`Agents Status ERROR`, e)
 	}
 
-	// Create 2 tasks
+	// Create 2 tasks (first one, the stock factory tick task)
 	try {
-		const t1 = await taskClient.create(userAddress, versions.tasks.contract_addr, executeGas, task1, coins(60_000, denom));
-		console.info(`Task 1 Create SUCCESS\n`, JSON.stringify(t1), '\n')
+		const t1 = await factoryClient.doProxyCall(
+			userAddress,
+			contracts.factory.address,
+			versions.tasks.contract_addr,
+			factoryTask1,
+			executeGas,
+			coins(60_000, denom)
+		);
+		console.info(`Factory Task 1 Create SUCCESS\n`, JSON.stringify(t1), '\n')
 	} catch (e) {
-		console.info(`Task 1 Create ERROR`, e)
+		console.info(`Factory Task 1 Create ERROR`, e)
 	}
+	// TODO: Bring back once better example above
+	// try {
+	// 	const t1 = await taskClient.create(userAddress, versions.tasks.contract_addr, executeGas, task1, coins(60_000, denom));
+	// 	console.info(`Task 1 Create SUCCESS\n`, JSON.stringify(t1), '\n')
+	// } catch (e) {
+	// 	console.info(`Task 1 Create ERROR`, e)
+	// }
 	try {
 		const t2 = await taskClient.create(userAddress, versions.tasks.contract_addr, executeGas, task2(1), coins(100_000, denom));
 		console.info(`Task 2 Create SUCCESS\n`, JSON.stringify(t2), '\n')

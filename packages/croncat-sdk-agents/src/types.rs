@@ -87,6 +87,14 @@ pub struct Config {
     pub agents_eject_threshold: u64,
     /// Minimum agent count in active queue to be untouched by bad agent verifier
     pub min_active_agent_count: u16,
+    /// Whether agent registration is public or restricted to an internal whitelist (allowed_agents)
+    /// Determines whether agent registration is open to the public
+    /// If false, the APPROVED_AGENTS map will determine if an agent is allowed to register
+    /// If true, any address can register and enter the pending queue,
+    /// provided they have the assets required.
+    /// Note that once this becomes true, it's intentionally meant to be true forever,
+    /// since this is an aspect of progressive decentralization
+    pub public_registration: bool,
 }
 
 #[cfg(test)]

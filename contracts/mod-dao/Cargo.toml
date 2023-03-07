@@ -1,6 +1,6 @@
 [package]
 name = "croncat-mod-dao"
-version = "0.1.1"
+version = "0.1.2"
 authors = []
 edition = "2021"
 repository = "https://github.com/CronCats/cw-croncat"

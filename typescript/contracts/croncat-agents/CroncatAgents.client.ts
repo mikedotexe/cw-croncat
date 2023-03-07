@@ -6,7 +6,7 @@
 
 import { CosmWasmClient, SigningCosmWasmClient, ExecuteResult } from "@cosmjs/cosmwasm-stargate";
 import { Coin, StdFee } from "@cosmjs/amino";
-import { Addr, InstantiateMsg, ExecuteMsg, AgentOnTaskCreated, AgentOnTaskCompleted, UpdateConfig, QueryMsg, Config, Uint128, Timestamp, Uint64, AgentStatus, AgentResponse, AgentInfo, GetAgentIdsResponse, AgentTaskResponse, TaskStats, Boolean } from "./CroncatAgents.types";
+import { Addr, InstantiateMsg, ExecuteMsg, AgentOnTaskCreated, AgentOnTaskCompleted, UpdateConfig, QueryMsg, Config, Uint128, Timestamp, Uint64, AgentStatus, AgentResponse, AgentInfo, GetAgentIdsResponse, AgentTaskResponse, TaskStats, ApprovedAgentAddresses, Boolean } from "./CroncatAgents.types";
 export interface CroncatAgentsReadOnlyInterface {
   contractAddress: string;
   getAgent: ({
@@ -21,6 +21,13 @@ export interface CroncatAgentsReadOnlyInterface {
     fromIndex?: number;
     limit?: number;
   }) => Promise<GetAgentIdsResponse>;
+  getApprovedAgentAddresses: ({
+    fromIndex,
+    limit
+  }: {
+    fromIndex?: number;
+    limit?: number;
+  }) => Promise<ApprovedAgentAddresses>;
   getAgentTasks: ({
     accountId
   }: {
@@ -38,6 +45,7 @@ export class CroncatAgentsQueryClient implements CroncatAgentsReadOnlyInterface 
     this.contractAddress = contractAddress;
     this.getAgent = this.getAgent.bind(this);
     this.getAgentIds = this.getAgentIds.bind(this);
+    this.getApprovedAgentAddresses = this.getApprovedAgentAddresses.bind(this);
     this.getAgentTasks = this.getAgentTasks.bind(this);
     this.config = this.config.bind(this);
     this.paused = this.paused.bind(this);
@@ -68,6 +76,20 @@ export class CroncatAgentsQueryClient implements CroncatAgentsReadOnlyInterface 
       }
     });
   };
+  getApprovedAgentAddresses = async ({
+    fromIndex,
+    limit
+  }: {
+    fromIndex?: number;
+    limit?: number;
+  }): Promise<ApprovedAgentAddresses> => {
+    return this.client.queryContractSmart(this.contractAddress, {
+      get_approved_agent_addresses: {
+        from_index: fromIndex,
+        limit
+      }
+    });
+  };
   getAgentTasks = async ({
     accountId
   }: {
@@ -93,6 +115,16 @@ export class CroncatAgentsQueryClient implements CroncatAgentsReadOnlyInterface 
 export interface CroncatAgentsInterface extends CroncatAgentsReadOnlyInterface {
   contractAddress: string;
   sender: string;
+  addAgentToWhitelist: ({
+    agentAddress
+  }: {
+    agentAddress: string;
+  }, fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
+  removeAgentFromWhitelist: ({
+    agentAddress
+  }: {
+    agentAddress: string;
+  }, fee?: number | StdFee | "auto", memo?: string, funds?: Coin[]) => Promise<ExecuteResult>;
   registerAgent: ({
     payableAccountId
   }: {
@@ -136,6 +168,8 @@ export class CroncatAgentsClient extends CroncatAgentsQueryClient implements Cro
     this.client = client;
     this.sender = sender;
     this.contractAddress = contractAddress;
+    this.addAgentToWhitelist = this.addAgentToWhitelist.bind(this);
+    this.removeAgentFromWhitelist = this.removeAgentFromWhitelist.bind(this);
     this.registerAgent = this.registerAgent.bind(this);
     this.updateAgent = this.updateAgent.bind(this);
     this.checkInAgent = this.checkInAgent.bind(this);
@@ -148,6 +182,28 @@ export class CroncatAgentsClient extends CroncatAgentsQueryClient implements Cro
     this.unpauseContract = this.unpauseContract.bind(this);
   }
 
+  addAgentToWhitelist = async ({
+    agentAddress
+  }: {
+    agentAddress: string;
+  }, fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
+    return await this.client.execute(this.sender, this.contractAddress, {
+      add_agent_to_whitelist: {
+        agent_address: agentAddress
+      }
+    }, fee, memo, funds);
+  };
+  removeAgentFromWhitelist = async ({
+    agentAddress
+  }: {
+    agentAddress: string;
+  }, fee: number | StdFee | "auto" = "auto", memo?: string, funds?: Coin[]): Promise<ExecuteResult> => {
+    return await this.client.execute(this.sender, this.contractAddress, {
+      remove_agent_from_whitelist: {
+        agent_address: agentAddress
+      }
+    }, fee, memo, funds);
+  };
   registerAgent = async ({
     payableAccountId
   }: {

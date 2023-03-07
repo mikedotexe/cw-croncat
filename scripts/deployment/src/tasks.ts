@@ -15,7 +15,14 @@ export class TaskClient {
     this.querier = querier;
   }
 
-  async deploy(artifactsRoot: string, sender: string, factoryAddress: string, uploadGas: StdFee, executeGas: StdFee): Promise<[number, string]> {
+  async deploy(
+    artifactsRoot: string,
+    sender: string,
+    factoryAddress: string,
+    pauserAddress: string,
+    uploadGas: StdFee,
+    executeGas: StdFee
+  ): Promise<[number, string]> {
     const wasm = fs.readFileSync(`${artifactsRoot}/croncat_tasks.wasm`)
     const uploadRes = await this.client.upload(sender, wasm, uploadGas)
     const codeId = uploadRes.codeId
@@ -39,11 +46,9 @@ export class TaskClient {
           "msg": Buffer.from(JSON.stringify({
             chain_name: prefix || 'juno',
             version: `${version[0]}.${version[1]}`,
+            pause_admin: `${pauserAddress}`,
             croncat_manager_key: ['manager', version || [0, 1]],
             croncat_agents_key: ['agents', version || [0, 1]],
-            // owner_addr: '',
-            // croncat_manager_key: '',
-            // croncat_agents_key: '',
             // slot_granularity_time: '',
             // gas_base_fee: '',
             // gas_action_fee: '',

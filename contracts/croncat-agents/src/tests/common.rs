@@ -59,6 +59,7 @@ pub(crate) fn mock_config(croncat_factory_addr: &str) -> Config {
         min_coins_for_agent_registration: DEFAULT_MIN_COINS_FOR_AGENT_REGISTRATION,
         agents_eject_threshold: 600,
         min_active_agent_count: DEFAULT_MIN_ACTIVE_AGENT_COUNT,
+        public_registration: true,
     }
 }
 
@@ -71,6 +72,7 @@ pub(crate) fn mock_update_config(_croncat_factory_addr: &str) -> UpdateConfig {
         min_coins_for_agent_registration: None,
         agents_eject_threshold: None,
         min_active_agent_count: None,
+        public_registration: Some(true),
     }
 }
 
@@ -118,7 +120,7 @@ pub(crate) fn init_test_scope(app: &mut App) -> TestScope {
         .unwrap();
 
     // Manager
-    let manager_module_instantiate_info = croncat_sdk_factory::msg::ModuleInstantiateInfo {
+    let manager_module_instantiate_info = ModuleInstantiateInfo {
         code_id: manager_code_id,
         version: [0, 1],
         commit_id: "commit1".to_owned(),
@@ -164,7 +166,7 @@ pub(crate) fn init_test_scope(app: &mut App) -> TestScope {
     let croncat_manager_addr = manager_contracts.metadata.unwrap().contract_addr;
 
     // Agents
-    let agents_module_instantiate_info = croncat_sdk_factory::msg::ModuleInstantiateInfo {
+    let agents_module_instantiate_info = ModuleInstantiateInfo {
         code_id: agents_code_id,
         version: [0, 1],
         commit_id: "some".to_owned(),
@@ -181,6 +183,8 @@ pub(crate) fn init_test_scope(app: &mut App) -> TestScope {
             min_tasks_per_agent: None,
             agents_eject_threshold: None,
             min_active_agent_count: None,
+            allowed_agents: Some(vec![]),
+            public_registration: true,
         })
         .unwrap(),
         contract_name: "agents".to_owned(),
