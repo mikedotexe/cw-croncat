@@ -5,8 +5,10 @@ use crate::state::{
     DEFAULT_MIN_COINS_FOR_AGENT_REGISTRATION, DEFAULT_NOMINATION_BLOCK_DURATION,
 };
 use crate::tests::common::*;
-use cosmwasm_std::{coins, to_binary, Addr, BankMsg, Coin, Uint128, Uint64, WasmMsg};
-use croncat_sdk_agents::msg::{AgentResponse, GetAgentIdsResponse, TaskStats};
+use cosmwasm_std::{coins, to_binary, Addr, BankMsg, Coin, StdError, Uint128, Uint64, WasmMsg};
+use croncat_sdk_agents::msg::{
+    AgentResponse, ApprovedAgentAddresses, GetAgentIdsResponse, TaskStats,
+};
 use croncat_sdk_agents::types::Config;
 use croncat_sdk_tasks::types::{Action, Interval, TaskRequest};
 
@@ -29,6 +31,8 @@ fn test_contract_initialize_is_successful() {
         min_coins_for_agent_registration: None,
         agents_eject_threshold: Some(DEFAULT_AGENTS_EJECT_THRESHOLD),
         min_active_agent_count: Some(DEFAULT_MIN_ACTIVE_AGENT_COUNT),
+        allowed_agents: Some(vec![]),
+        public_registration: true,
     };
     let croncat_agents_addr = app
         .instantiate_contract(
@@ -57,6 +61,8 @@ fn test_contract_initialize_is_successful() {
         min_coins_for_agent_registration: None,
         agents_eject_threshold: Some(DEFAULT_AGENTS_EJECT_THRESHOLD),
         min_active_agent_count: Some(DEFAULT_MIN_ACTIVE_AGENT_COUNT),
+        allowed_agents: Some(vec![]),
+        public_registration: true,
     };
 
     let croncat_agents_addr = app
@@ -875,7 +881,7 @@ fn test_withdraw_rewards_balances_on_unregister() {
         .amount
         .u128();
 
-    //Check balances are not changed, as we don't have any rewards to withdraw
+    // Check balances are not changed, as we don't have any rewards to withdraw
     assert_eq!(old_balance, 500000);
     assert_eq!(new_balance, 500000);
 }
@@ -1025,6 +1031,7 @@ fn test_tick() {
             agent_nomination_duration: Some(DEFAULT_NOMINATION_BLOCK_DURATION),
             agents_eject_threshold: Some(1000), // allow to miss 1000 slots
             min_active_agent_count: Some(1),
+            public_registration: Some(true),
         },
     };
 
@@ -1308,6 +1315,8 @@ fn check_validation_instantiate() {
         min_tasks_per_agent: None,
         agents_eject_threshold: None,
         min_active_agent_count: None,
+        allowed_agents: Some(vec![]),
+        public_registration: true,
     };
 
     // Check agent_nomination_duration
@@ -1484,6 +1493,8 @@ fn check_validation_update_config() {
             min_tasks_per_agent: None,
             agents_eject_threshold: None,
             min_active_agent_count: None,
+            allowed_agents: Some(vec![]),
+            public_registration: true,
         })
         .unwrap(),
         contract_name: "agents".to_owned(),
@@ -1527,6 +1538,7 @@ fn check_validation_update_config() {
         agents_eject_threshold: None,
         min_active_agent_count: None,
         min_coins_for_agent_registration: None,
+        public_registration: Some(true),
     };
 
     let mut update_config_exec_msg = ExecuteMsg::UpdateConfig {
@@ -1655,6 +1667,8 @@ fn pause_admin_cases() {
         min_tasks_per_agent: None,
         agents_eject_threshold: None,
         min_active_agent_count: None,
+        allowed_agents: Some(vec![]),
+        public_registration: true,
     };
     // Attempt to initialize with short address for pause_admin
     let mut init_agent_contract_msg_short_addr = init_agent_contract_msg.clone();
@@ -1843,6 +1857,359 @@ fn pause_admin_cases() {
         .query_wasm_smart(croncat_agents_addr, &QueryMsg::Paused {})
         .unwrap();
     assert!(!is_paused);
+}
+
+#[test]
+fn agent_registration_whitelist() {
+    let mut app = default_app();
+
+    let factory_code_id = app.store_code(contracts::croncat_factory_contract());
+    let manager_code_id = app.store_code(contracts::croncat_manager_contract());
+    let agents_code_id = app.store_code(contracts::croncat_agents_contract());
+
+    let init_msg = croncat_sdk_factory::msg::FactoryInstantiateMsg {
+        owner_addr: Some(ADMIN.to_owned()),
+    };
+    let croncat_factory_addr = app
+        .instantiate_contract(
+            factory_code_id,
+            Addr::unchecked(ADMIN),
+            &init_msg,
+            &[],
+            "factory",
+            None,
+        )
+        .unwrap();
+
+    let init_manager_contract_msg = croncat_sdk_manager::msg::ManagerInstantiateMsg {
+        version: Some("0.1".to_string()),
+        croncat_tasks_key: ("".to_string(), [0, 1]),
+        croncat_agents_key: ("".to_string(), [0, 1]),
+        pause_admin: Addr::unchecked(PAUSE_ADMIN),
+        gas_price: None,
+        treasury_addr: None,
+        cw20_whitelist: None,
+    };
+    // Deploy manager
+    app.execute_contract(
+        Addr::unchecked(ADMIN),
+        croncat_factory_addr.clone(),
+        &croncat_sdk_factory::msg::FactoryExecuteMsg::Deploy {
+            kind: croncat_sdk_factory::msg::VersionKind::Manager,
+            module_instantiate_info: croncat_sdk_factory::msg::ModuleInstantiateInfo {
+                code_id: manager_code_id,
+                version: [0, 1],
+                commit_id: "some".to_owned(),
+                checksum: "qwe123".to_owned(),
+                changelog_url: None,
+                schema: None,
+                msg: to_binary(&init_manager_contract_msg).unwrap(),
+                contract_name: "manager".to_owned(),
+            },
+        },
+        &[],
+    )
+    .unwrap();
+
+    let mut init_agent_contract_msg = InstantiateMsg {
+        version: Some("0.1".to_owned()),
+        croncat_manager_key: ("manager".to_owned(), [0, 1]),
+        croncat_tasks_key: ("tasks".to_owned(), [0, 1]),
+        pause_admin: Addr::unchecked(PAUSE_ADMIN),
+        min_coins_for_agent_registration: None,
+        agent_nomination_duration: None,
+        min_tasks_per_agent: None,
+        agents_eject_threshold: None,
+        min_active_agent_count: None,
+        allowed_agents: Some(vec![String::from("Foo")]),
+        // Note: this is different than most tests
+        public_registration: false,
+    };
+    let agents_module_instantiate_info = croncat_sdk_factory::msg::ModuleInstantiateInfo {
+        code_id: agents_code_id,
+        version: [0, 1],
+        commit_id: "some".to_owned(),
+        checksum: "qwe123".to_owned(),
+        changelog_url: None,
+        schema: None,
+        msg: to_binary(&init_agent_contract_msg).unwrap(),
+        contract_name: "agents".to_owned(),
+    };
+    let mut err: ContractError = app
+        .execute_contract(
+            Addr::unchecked(ADMIN),
+            croncat_factory_addr.clone(),
+            &croncat_sdk_factory::msg::FactoryExecuteMsg::Deploy {
+                kind: croncat_sdk_factory::msg::VersionKind::Agents,
+                module_instantiate_info: agents_module_instantiate_info,
+            },
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+
+    assert_eq!(
+        err,
+        ContractError::Std(StdError::generic_err(
+            "Invalid input: address not normalized"
+        ))
+    );
+
+    // Have it succeed
+    init_agent_contract_msg.allowed_agents = Some(vec![AGENT0.to_string()]);
+    let agents_module_instantiate_info = croncat_sdk_factory::msg::ModuleInstantiateInfo {
+        code_id: agents_code_id,
+        version: [0, 1],
+        commit_id: "some".to_owned(),
+        checksum: "qwe123".to_owned(),
+        changelog_url: None,
+        schema: None,
+        msg: to_binary(&init_agent_contract_msg).unwrap(),
+        contract_name: "agents".to_owned(),
+    };
+    app.execute_contract(
+        Addr::unchecked(ADMIN),
+        croncat_factory_addr.clone(),
+        &croncat_sdk_factory::msg::FactoryExecuteMsg::Deploy {
+            kind: croncat_sdk_factory::msg::VersionKind::Agents,
+            module_instantiate_info: agents_module_instantiate_info,
+        },
+        &[],
+    )
+    .unwrap();
+    // Get agents contract address
+    let agent_contracts: ContractMetadataResponse = app
+        .wrap()
+        .query_wasm_smart(
+            croncat_factory_addr.clone(),
+            &croncat_sdk_factory::msg::FactoryQueryMsg::LatestContract {
+                contract_name: "agents".to_string(),
+            },
+        )
+        .unwrap();
+    assert!(
+        agent_contracts.metadata.is_some(),
+        "Should be contract metadata"
+    );
+
+    let agent_metadata = agent_contracts.metadata.unwrap();
+    let croncat_agents_addr = agent_metadata.contract_addr;
+
+    // Fast forward time a little
+    app.update_block(|block| add_seconds_to_block(block, 6 * 666));
+    app.update_block(|block| increment_block_height(block, Some(666)));
+
+    // Query to ensure they were stored
+    let approved_agents_res: ApprovedAgentAddresses = app
+        .wrap()
+        .query_wasm_smart(
+            croncat_agents_addr.clone(),
+            &QueryMsg::GetApprovedAgentAddresses {
+                from_index: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        approved_agents_res,
+        ApprovedAgentAddresses {
+            approved_addresses: vec![Addr::unchecked(AGENT0)],
+        }
+    );
+
+    // Unapproved agent tries to register when public registration is closed
+    err = app
+        .execute_contract(
+            Addr::unchecked(AGENT1),
+            croncat_agents_addr.clone(),
+            &ExecuteMsg::RegisterAgent {
+                payable_account_id: None,
+            },
+            &[],
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(err, ContractError::UnapprovedAgent {});
+
+    // Register the approved agent
+    assert!(
+        register_agent(&mut app, &croncat_agents_addr, AGENT0, AGENT_BENEFICIARY).is_ok(),
+        "Approved agent should register successfully"
+    );
+
+    // Test adding a new approved agent
+    assert!(
+        app.execute_contract(
+            Addr::unchecked(ADMIN),
+            croncat_factory_addr.clone(),
+            &croncat_sdk_factory::msg::FactoryExecuteMsg::Proxy {
+                msg: WasmMsg::Execute {
+                    contract_addr: croncat_agents_addr.to_string(),
+                    msg: to_binary(&ExecuteMsg::AddAgentToWhitelist {
+                        agent_address: AGENT1.to_string(),
+                    })
+                    .unwrap(),
+                    funds: vec![],
+                },
+            },
+            &[], // Zero funds
+        )
+        .is_ok(),
+        "Adding agent to whitelist should succeed"
+    );
+
+    assert!(
+        app.execute_contract(
+            Addr::unchecked(AGENT1),
+            croncat_agents_addr.clone(),
+            &ExecuteMsg::RegisterAgent {
+                payable_account_id: None,
+            },
+            &[],
+        )
+        .is_ok(),
+        "Agent not on whitelist should be allowed to register when public registration is enabled"
+    );
+
+    let mut current_allowed_agents: ApprovedAgentAddresses = app
+        .wrap()
+        .query_wasm_smart(
+            croncat_agents_addr.clone(),
+            &QueryMsg::GetApprovedAgentAddresses {
+                from_index: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        current_allowed_agents,
+        ApprovedAgentAddresses {
+            approved_addresses: vec![Addr::unchecked(AGENT0), Addr::unchecked(AGENT1)],
+        }
+    );
+
+    // Remove an agent
+    assert!(
+        app.execute_contract(
+            Addr::unchecked(ADMIN),
+            croncat_factory_addr.clone(),
+            &croncat_sdk_factory::msg::FactoryExecuteMsg::Proxy {
+                msg: WasmMsg::Execute {
+                    contract_addr: croncat_agents_addr.to_string(),
+                    msg: to_binary(&ExecuteMsg::RemoveAgentFromWhitelist {
+                        agent_address: AGENT0.to_string(),
+                    })
+                    .unwrap(),
+                    funds: vec![],
+                },
+            },
+            &[], // Zero funds
+        )
+        .is_ok(),
+        "Adding agent to whitelist should succeed"
+    );
+    current_allowed_agents = app
+        .wrap()
+        .query_wasm_smart(
+            croncat_agents_addr.clone(),
+            &QueryMsg::GetApprovedAgentAddresses {
+                from_index: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        current_allowed_agents,
+        ApprovedAgentAddresses {
+            approved_addresses: vec![Addr::unchecked(AGENT1)],
+        }
+    );
+
+    // Update config to allow public registration for agents
+    assert!(
+        app.execute_contract(
+            Addr::unchecked(ADMIN),
+            croncat_factory_addr.clone(),
+            &croncat_sdk_factory::msg::FactoryExecuteMsg::Proxy {
+                msg: WasmMsg::Execute {
+                    contract_addr: croncat_agents_addr.to_string(),
+                    msg: to_binary(&ExecuteMsg::UpdateConfig {
+                        config: UpdateConfig {
+                            croncat_manager_key: None,
+                            croncat_tasks_key: None,
+                            min_tasks_per_agent: None,
+                            agent_nomination_duration: None,
+                            min_coins_for_agent_registration: None,
+                            agents_eject_threshold: None,
+                            min_active_agent_count: None,
+                            public_registration: Some(true),
+                        },
+                    })
+                    .unwrap(),
+                    funds: vec![],
+                },
+            },
+            &[], // Zero funds
+        )
+        .is_ok(),
+        "Updating agents' config allowing public registration should succeed"
+    );
+
+    // After registration is opened to the public, the approved list should be clear
+    current_allowed_agents = app
+        .wrap()
+        .query_wasm_smart(
+            croncat_agents_addr.clone(),
+            &QueryMsg::GetApprovedAgentAddresses {
+                from_index: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        current_allowed_agents,
+        ApprovedAgentAddresses {
+            approved_addresses: vec![],
+        }
+    );
+
+    // Check failure wif admin attempts to "reverse" the public registration from true » false
+    err = app
+        .execute_contract(
+            Addr::unchecked(ADMIN),
+            croncat_factory_addr,
+            &croncat_sdk_factory::msg::FactoryExecuteMsg::Proxy {
+                msg: WasmMsg::Execute {
+                    contract_addr: croncat_agents_addr.to_string(),
+                    msg: to_binary(&ExecuteMsg::UpdateConfig {
+                        config: UpdateConfig {
+                            croncat_manager_key: None,
+                            croncat_tasks_key: None,
+                            min_tasks_per_agent: None,
+                            agent_nomination_duration: None,
+                            min_coins_for_agent_registration: None,
+                            agents_eject_threshold: None,
+                            min_active_agent_count: None,
+                            // This is prohibited once progressive decentralization has begun
+                            public_registration: Some(false),
+                        },
+                    })
+                    .unwrap(),
+                    funds: vec![],
+                },
+            },
+            &[], // Zero funds
+        )
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(
+        err,
+        ContractError::DecentralizationEnabled {},
+        "Should not be able to reverse public registration"
+    );
 }
 
 fn register_agent(

@@ -1,6 +1,6 @@
 [package]
 name = "croncat-sdk-manager"
-version = "0.1.1"
+version = "0.1.2"
 authors = { workspace = true }
 edition = "2021"
 repository = "https://github.com/CronCats/cw-croncat"

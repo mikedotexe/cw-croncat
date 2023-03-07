@@ -89,22 +89,16 @@ pub(crate) fn attached_natives(
     native_denom: &str,
     funds: Vec<Coin>,
 ) -> Result<(Uint128, Option<Coin>), ContractError> {
-    let mut ibc: Option<Coin> = None;
+    let mut token: Option<Coin> = None;
     let mut native = Uint128::zero();
     for f in funds {
         if f.denom == native_denom {
             native += f.amount;
-        } else if let Some(ibc) = &mut ibc {
-            if f.denom == ibc.denom {
-                ibc.amount += f.amount
-            } else {
-                return Err(ContractError::InvalidAttachedCoins {});
-            }
         } else {
-            ibc = Some(f);
+            token = Some(f);
         }
     }
-    Ok((native, ibc))
+    Ok((native, token))
 }
 
 pub(crate) fn calculate_required_natives(

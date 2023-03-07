@@ -41,11 +41,22 @@ pub struct InstantiateMsg {
 
     /// Minimum agent count in active queue to be untouched by bad agent verifier
     pub min_active_agent_count: Option<u16>,
+
+    /// Whether agent registration is public or restricted to an internal whitelist
+    pub public_registration: bool,
+
+    /// If public registration is false, this provides initial, approved agent addresses
+    pub allowed_agents: Option<Vec<String>>,
 }
 
 /// Execute messages for agent contract
 #[cw_serde]
 pub enum ExecuteMsg {
+    /// Adds an agent address to the internal whitelist
+    AddAgentToWhitelist { agent_address: String },
+    /// Removes an agent from the whitelist
+    /// Note: this does not kick the agent, but instead means they will not be able to re-register
+    RemoveAgentFromWhitelist { agent_address: String },
     /// Action registers new agent
     RegisterAgent { payable_account_id: Option<String> },
     /// Action for updating agents
@@ -81,6 +92,13 @@ pub enum QueryMsg {
         from_index: Option<u64>,
         limit: Option<u64>,
     },
+    /// Gets the approved agents' addresses, pagination is supported
+    /// This only applies when Config's `public_registration` is false
+    #[returns[ApprovedAgentAddresses]]
+    GetApprovedAgentAddresses {
+        from_index: Option<u64>,
+        limit: Option<u64>,
+    },
     /// Gets the specified agent tasks
     #[returns[AgentTaskResponse]]
     GetAgentTasks { account_id: String },
@@ -99,6 +117,12 @@ pub struct GetAgentIdsResponse {
     pub active: Vec<Addr>,
     /// Pending agent list
     pub pending: Vec<Addr>,
+}
+/// Response containing approved agents' addresses
+#[cw_serde]
+pub struct ApprovedAgentAddresses {
+    /// Active agent list
+    pub approved_addresses: Vec<Addr>,
 }
 /// Agent data
 #[cw_serde]
@@ -157,4 +181,7 @@ pub struct UpdateConfig {
 
     /// Minimum agent count in active queue to be untouched by bad agent verifier
     pub min_active_agent_count: Option<u16>,
+
+    /// Determines whether agent registration is public or uses the whitelist (APPROVED_AGENTS Map)
+    pub public_registration: Option<bool>,
 }

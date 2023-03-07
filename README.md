@@ -10,8 +10,9 @@
 ## BETA: 
 
 This repo is in early develop stage - use at your own risk!
+Currently in Juno, Osmosis & Stargaze testnets
 
-[![codecov](https://codecov.io/gh/CronCats/cw-croncat/branch/beta/split-0.0.0/graph/badge.svg?token=JU1C4RK7X4)](https://codecov.io/gh/CronCats/cw-croncat)
+[![codecov](https://codecov.io/gh/CronCats/cw-croncat/branch/beta-0.1.2/graph/badge.svg?token=JU1C4RK7X4)](https://codecov.io/gh/CronCats/cw-croncat)
 
 ## Deployment
 

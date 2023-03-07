@@ -1,6 +1,6 @@
 {
   "contract_name": "croncat-agents",
-  "contract_version": "0.1.1",
+  "contract_version": "0.1.2",
   "idl_version": "1.0.0",
   "instantiate": {
     "$schema": "http://json-schema.org/draft-07/schema#",
@@ -9,7 +9,8 @@
     "required": [
       "croncat_manager_key",
       "croncat_tasks_key",
-      "pause_admin"
+      "pause_admin",
+      "public_registration"
     ],
     "properties": {
       "agent_nomination_duration": {
@@ -29,6 +30,16 @@
         ],
         "format": "uint64",
         "minimum": 0.0
+      },
+      "allowed_agents": {
+        "description": "If public registration is false, this provides initial, approved agent addresses",
+        "type": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "type": "string"
+        }
       },
       "croncat_manager_key": {
         "description": "Name of the key for raw querying Manager address from the factory",
@@ -107,6 +118,10 @@
           }
         ]
       },
+      "public_registration": {
+        "description": "Whether agent registration is public or restricted to an internal whitelist",
+        "type": "boolean"
+      },
       "version": {
         "description": "CW2 Version provided by factory",
         "type": [
@@ -128,6 +143,50 @@
     "title": "ExecuteMsg",
     "description": "Execute messages for agent contract",
     "oneOf": [
+      {
+        "description": "Adds an agent address to the internal whitelist",
+        "type": "object",
+        "required": [
+          "add_agent_to_whitelist"
+        ],
+        "properties": {
+          "add_agent_to_whitelist": {
+            "type": "object",
+            "required": [
+              "agent_address"
+            ],
+            "properties": {
+              "agent_address": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Removes an agent from the whitelist Note: this does not kick the agent, but instead means they will not be able to re-register",
+        "type": "object",
+        "required": [
+          "remove_agent_from_whitelist"
+        ],
+        "properties": {
+          "remove_agent_from_whitelist": {
+            "type": "object",
+            "required": [
+              "agent_address"
+            ],
+            "properties": {
+              "agent_address": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
       {
         "description": "Action registers new agent",
         "type": "object",
@@ -420,6 +479,13 @@
             ],
             "format": "uint64",
             "minimum": 0.0
+          },
+          "public_registration": {
+            "description": "Determines whether agent registration is public or uses the whitelist (APPROVED_AGENTS Map)",
+            "type": [
+              "boolean",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -461,6 +527,38 @@
         ],
         "properties": {
           "get_agent_ids": {
+            "type": "object",
+            "properties": {
+              "from_index": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "uint64",
+                "minimum": 0.0
+              },
+              "limit": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Gets the approved agents' addresses, pagination is supported This only applies when Config's `public_registration` is false",
+        "type": "object",
+        "required": [
+          "get_approved_agent_addresses"
+        ],
+        "properties": {
+          "get_approved_agent_addresses": {
             "type": "object",
             "properties": {
               "from_index": {
@@ -555,7 +653,8 @@
         "min_coins_for_agent_registration",
         "min_tasks_per_agent",
         "owner_addr",
-        "pause_admin"
+        "pause_admin",
+        "public_registration"
       ],
       "properties": {
         "agent_nomination_block_duration": {
@@ -653,6 +752,10 @@
               "$ref": "#/definitions/Addr"
             }
           ]
+        },
+        "public_registration": {
+          "description": "Whether agent registration is public or restricted to an internal whitelist (allowed_agents) Determines whether agent registration is open to the public If false, the APPROVED_AGENTS map will determine if an agent is allowed to register If true, any address can register and enter the pending queue, provided they have the assets required. Note that once this becomes true, it's intentionally meant to be true forever, since this is an aspect of progressive decentralization",
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -847,6 +950,31 @@
         },
         "Uint64": {
           "description": "A thin wrapper around u64 that is using strings for JSON encoding/decoding, such that the full u64 range can be used for clients that convert JSON numbers to floats, like JavaScript and jq.\n\n# Examples\n\nUse `from` to create instances of this and `u64` to get the value out:\n\n``` # use cosmwasm_std::Uint64; let a = Uint64::from(42u64); assert_eq!(a.u64(), 42);\n\nlet b = Uint64::from(70u32); assert_eq!(b.u64(), 70); ```",
+          "type": "string"
+        }
+      }
+    },
+    "get_approved_agent_addresses": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ApprovedAgentAddresses",
+      "description": "Response containing approved agents' addresses",
+      "type": "object",
+      "required": [
+        "approved_addresses"
+      ],
+      "properties": {
+        "approved_addresses": {
+          "description": "Active agent list",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Addr"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "Addr": {
+          "description": "A human readable address.\n\nIn Cosmos, this is typically bech32 encoded. But for multi-chain smart contracts no assumptions should be made other than being UTF-8 encoded and of reasonable length.\n\nThis type represents a validated address. It can be created in the following ways 1. Use `Addr::unchecked(input)` 2. Use `let checked: Addr = deps.api.addr_validate(input)?` 3. Use `let checked: Addr = deps.api.addr_humanize(canonical_addr)?` 4. Deserialize from JSON. This must only be done from JSON that was validated before such as a contract's state. `Addr` must not be used in messages sent by the user because this would result in unvalidated instances.\n\nThis type is immutable. If you really need to mutate it (Really? Are you sure?), create a mutable copy using `let mut mutable = Addr::to_string()` and operate on that `String` instance.",
           "type": "string"
         }
       }

@@ -51,6 +51,7 @@ pub mod croncat_tasks_contract {
         Ok((response.block_tasks, response.cron_tasks))
     }
 }
+
 pub mod croncat_manager_contract {
 
     use super::*;
@@ -64,6 +65,7 @@ pub mod croncat_manager_contract {
 
         Ok(manager_config)
     }
+
     pub(crate) fn query_manager_addr(
         deps_queries: &QuerierWrapper<Empty>,
         config: &Config,
