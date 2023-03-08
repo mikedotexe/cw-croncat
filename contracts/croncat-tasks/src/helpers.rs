@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    Addr, BankMsg, Binary, BlockInfo, CosmosMsg, Deps, Empty, Order, QuerierWrapper, StdResult,
-    Storage, WasmMsg,
+    Addr, BankMsg, Binary, BlockInfo, CosmosMsg, Deps, Empty, QuerierWrapper, StdResult, Storage,
+    WasmMsg,
 };
 use croncat_sdk_tasks::types::{
     AmountForOneTask, Boundary, BoundaryHeight, BoundaryTime, Config, Interval, TaskRequest,
@@ -8,7 +8,7 @@ use croncat_sdk_tasks::types::{
 use cw20::{Cw20CoinVerified, Cw20ExecuteMsg};
 
 use crate::{
-    state::{tasks_map, BLOCK_SLOTS, EVENTED_TASKS_LOOKUP, TASKS_TOTAL, TIME_SLOTS},
+    state::{tasks_map, BLOCK_SLOTS, EVENTED_TASKS_LOOKUP, TASKS_TOTAL, TASK_SLOT, TIME_SLOTS},
     ContractError,
 };
 
@@ -199,64 +199,16 @@ pub(crate) fn remove_task(
 ) -> StdResult<()> {
     tasks_map().remove(storage, hash)?;
     TASKS_TOTAL.update(storage, |total| StdResult::Ok(total - 1))?;
+    let slot_id = TASK_SLOT.load(storage, hash)?;
+
     if is_evented {
-        let hashes = EVENTED_TASKS_LOOKUP
-            .range(storage, None, None, Order::Ascending)
-            .collect::<StdResult<Vec<_>>>()?;
-        for (hid, mut all_hashes) in hashes {
-            let mut found = false;
-            all_hashes.retain(|h| {
-                found = h == hash;
-                !found
-            });
-            if found {
-                if all_hashes.is_empty() {
-                    EVENTED_TASKS_LOOKUP.remove(storage, hid);
-                } else {
-                    EVENTED_TASKS_LOOKUP.save(storage, hid, &all_hashes)?;
-                }
-                break;
-            }
-        }
+        EVENTED_TASKS_LOOKUP.remove(storage, (slot_id, hash));
     } else if is_block {
-        let blocks = BLOCK_SLOTS
-            .range(storage, None, None, Order::Ascending)
-            .collect::<StdResult<Vec<_>>>()?;
-        for (bid, mut block_hashes) in blocks {
-            let mut found = false;
-            block_hashes.retain(|h| {
-                found = h == hash;
-                !found
-            });
-            if found {
-                if block_hashes.is_empty() {
-                    BLOCK_SLOTS.remove(storage, bid);
-                } else {
-                    BLOCK_SLOTS.save(storage, bid, &block_hashes)?;
-                }
-                break;
-            }
-        }
+        BLOCK_SLOTS.remove(storage, (slot_id, hash));
     } else {
-        let time_buckets = TIME_SLOTS
-            .range(storage, None, None, Order::Ascending)
-            .collect::<StdResult<Vec<_>>>()?;
-        for (tid, mut time_hashes) in time_buckets {
-            let mut found = false;
-            time_hashes.retain(|h| {
-                found = h == hash;
-                !found
-            });
-            if found {
-                if time_hashes.is_empty() {
-                    TIME_SLOTS.remove(storage, tid);
-                } else {
-                    TIME_SLOTS.save(storage, tid, &time_hashes)?;
-                }
-                break;
-            }
-        }
+        TIME_SLOTS.remove(storage, (slot_id, hash));
     }
+    TASK_SLOT.remove(storage, hash);
 
     Ok(())
 }

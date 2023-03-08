@@ -1557,37 +1557,6 @@
       {
         "type": "object",
         "required": [
-          "evented_ids"
-        ],
-        "properties": {
-          "evented_ids": {
-            "type": "object",
-            "properties": {
-              "from_index": {
-                "type": [
-                  "integer",
-                  "null"
-                ],
-                "format": "uint64",
-                "minimum": 0.0
-              },
-              "limit": {
-                "type": [
-                  "integer",
-                  "null"
-                ],
-                "format": "uint64",
-                "minimum": 0.0
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "additionalProperties": false
-      },
-      {
-        "type": "object",
-        "required": [
           "evented_hashes"
         ],
         "properties": {
@@ -1735,38 +1704,6 @@
             "type": "object",
             "properties": {
               "slot": {
-                "type": [
-                  "integer",
-                  "null"
-                ],
-                "format": "uint64",
-                "minimum": 0.0
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "additionalProperties": false
-      },
-      {
-        "description": "Get active slots",
-        "type": "object",
-        "required": [
-          "slot_ids"
-        ],
-        "properties": {
-          "slot_ids": {
-            "type": "object",
-            "properties": {
-              "from_index": {
-                "type": [
-                  "integer",
-                  "null"
-                ],
-                "format": "uint64",
-                "minimum": 0.0
-              },
-              "limit": {
                 "type": [
                   "integer",
                   "null"
@@ -4275,16 +4212,6 @@
         "type": "string"
       }
     },
-    "evented_ids": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "Array_of_uint64",
-      "type": "array",
-      "items": {
-        "type": "integer",
-        "format": "uint64",
-        "minimum": 0.0
-      }
-    },
     "evented_tasks": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "Array_of_TaskInfo",
@@ -5464,34 +5391,6 @@
           "type": "array",
           "items": {
             "type": "string"
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "slot_ids": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "SlotIdsResponse",
-      "type": "object",
-      "required": [
-        "block_ids",
-        "time_ids"
-      ],
-      "properties": {
-        "block_ids": {
-          "type": "array",
-          "items": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0.0
-          }
-        },
-        "time_ids": {
-          "type": "array",
-          "items": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0.0
           }
         }
       },

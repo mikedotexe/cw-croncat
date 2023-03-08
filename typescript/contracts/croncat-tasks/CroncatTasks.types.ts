@@ -274,11 +274,6 @@ export type QueryMsg = {
     limit?: number | null;
   };
 } | {
-  evented_ids: {
-    from_index?: number | null;
-    limit?: number | null;
-  };
-} | {
   evented_hashes: {
     from_index?: number | null;
     id?: number | null;
@@ -303,11 +298,6 @@ export type QueryMsg = {
 } | {
   slot_hashes: {
     slot?: number | null;
-  };
-} | {
-  slot_ids: {
-    from_index?: number | null;
-    limit?: number | null;
   };
 } | {
   slot_tasks_total: {
@@ -376,7 +366,6 @@ export interface CurrentTaskInfoResponse {
   total: Uint64;
 }
 export type ArrayOfString = string[];
-export type ArrayOfUint64 = number[];
 export type ArrayOfTaskInfo = TaskInfo[];
 export type Boolean = boolean;
 export interface SlotHashesResponse {
@@ -384,10 +373,6 @@ export interface SlotHashesResponse {
   block_task_hash: string[];
   time_id: number;
   time_task_hash: string[];
-}
-export interface SlotIdsResponse {
-  block_ids: number[];
-  time_ids: number[];
 }
 export interface SlotTasksTotalResponse {
   block_tasks: number;
