@@ -137,7 +137,6 @@ fn execute_update_config(
 
     // Destruct so we won't forget to update if if new fields added
     let UpdateConfigMsg {
-        croncat_factory_addr,
         croncat_manager_key,
         croncat_agents_key,
         slot_granularity_time,
@@ -150,10 +149,7 @@ fn execute_update_config(
     let new_config = Config {
         owner_addr: config.owner_addr,
         pause_admin: config.pause_admin,
-        croncat_factory_addr: croncat_factory_addr
-            .map(|human| deps.api.addr_validate(&human))
-            .transpose()?
-            .unwrap_or(config.croncat_factory_addr),
+        croncat_factory_addr: config.croncat_factory_addr,
         chain_name: config.chain_name,
         version: config.version,
         croncat_manager_key: croncat_manager_key.unwrap_or(config.croncat_manager_key),

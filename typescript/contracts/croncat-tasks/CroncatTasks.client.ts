@@ -275,7 +275,6 @@ export interface CroncatTasksInterface extends CroncatTasksReadOnlyInterface {
   sender: string;
   updateConfig: ({
     croncatAgentsKey,
-    croncatFactoryAddr,
     croncatManagerKey,
     gasActionFee,
     gasBaseFee,
@@ -284,7 +283,6 @@ export interface CroncatTasksInterface extends CroncatTasksReadOnlyInterface {
     slotGranularityTime
   }: {
     croncatAgentsKey?: string[][];
-    croncatFactoryAddr?: string;
     croncatManagerKey?: string[][];
     gasActionFee?: number;
     gasBaseFee?: number;
@@ -336,7 +334,6 @@ export class CroncatTasksClient extends CroncatTasksQueryClient implements Cronc
 
   updateConfig = async ({
     croncatAgentsKey,
-    croncatFactoryAddr,
     croncatManagerKey,
     gasActionFee,
     gasBaseFee,
@@ -345,7 +342,6 @@ export class CroncatTasksClient extends CroncatTasksQueryClient implements Cronc
     slotGranularityTime
   }: {
     croncatAgentsKey?: string[][];
-    croncatFactoryAddr?: string;
     croncatManagerKey?: string[][];
     gasActionFee?: number;
     gasBaseFee?: number;
@@ -356,7 +352,6 @@ export class CroncatTasksClient extends CroncatTasksQueryClient implements Cronc
     return await this.client.execute(this.sender, this.contractAddress, {
       update_config: {
         croncat_agents_key: croncatAgentsKey,
-        croncat_factory_addr: croncatFactoryAddr,
         croncat_manager_key: croncatManagerKey,
         gas_action_fee: gasActionFee,
         gas_base_fee: gasBaseFee,
