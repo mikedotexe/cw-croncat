@@ -1599,7 +1599,6 @@ fn update_cfg() {
     let msg = WasmMsg::Execute {
         contract_addr: tasks_addr.to_string(),
         msg: to_binary(&ExecuteMsg::UpdateConfig(UpdateConfigMsg {
-            croncat_factory_addr: Some("fixed_croncat_factory_addr".to_owned()),
             croncat_manager_key: Some(("new_manager2".to_owned(), [2, 2])),
             croncat_agents_key: Some(("new_agents2".to_owned(), [2, 2])),
             slot_granularity_time: Some(54),
@@ -1627,7 +1626,7 @@ fn update_cfg() {
         version: "0.1".to_owned(),
         owner_addr: factory_addr.clone(),
         pause_admin: Addr::unchecked(PAUSE_ADMIN),
-        croncat_factory_addr: Addr::unchecked("fixed_croncat_factory_addr"),
+        croncat_factory_addr: factory_addr.clone(),
         chain_name: "atom".to_owned(),
         croncat_manager_key: ("new_manager2".to_owned(), [2, 2]),
         croncat_agents_key: ("new_agents2".to_owned(), [2, 2]),
@@ -1645,7 +1644,6 @@ fn update_cfg() {
     let msg = WasmMsg::Execute {
         contract_addr: tasks_addr.to_string(),
         msg: to_binary(&ExecuteMsg::UpdateConfig(UpdateConfigMsg {
-            croncat_factory_addr: None,
             croncat_manager_key: None,
             croncat_agents_key: None,
             slot_granularity_time: None,
@@ -3574,7 +3572,6 @@ fn invalid_gas_config() {
     // Ensure that invalid config updates fail
     // Test failure when gas_limit is too low (should be more than the sum of other gas_* values)
     let mut update_msg = UpdateConfigMsg {
-        croncat_factory_addr: Some("fixed_croncat_factory_addr".to_owned()),
         croncat_manager_key: Some(("manager2".to_owned(), [2, 2])),
         croncat_agents_key: Some(("agents2".to_owned(), [2, 2])),
         slot_granularity_time: Some(54),

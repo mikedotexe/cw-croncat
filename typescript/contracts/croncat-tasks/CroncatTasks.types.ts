@@ -186,7 +186,6 @@ export type ValueIndex = {
 export type PathToValue = ValueIndex[];
 export interface UpdateConfigMsg {
   croncat_agents_key?: [string, [number, number]] | null;
-  croncat_factory_addr?: string | null;
   croncat_manager_key?: [string, [number, number]] | null;
   gas_action_fee?: number | null;
   gas_base_fee?: number | null;

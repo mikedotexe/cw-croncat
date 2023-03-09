@@ -38,7 +38,6 @@ pub struct TasksInstantiateMsg {
 
 #[cw_serde]
 pub struct UpdateConfigMsg {
-    pub croncat_factory_addr: Option<String>,
     pub croncat_manager_key: Option<(String, [u8; 2])>,
     pub croncat_agents_key: Option<(String, [u8; 2])>,
     pub slot_granularity_time: Option<u64>,

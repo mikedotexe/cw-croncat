@@ -1139,12 +1139,6 @@
             "maxItems": 2,
             "minItems": 2
           },
-          "croncat_factory_addr": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "croncat_manager_key": {
             "type": [
               "array",
