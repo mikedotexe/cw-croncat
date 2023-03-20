@@ -75,16 +75,21 @@ const start = async () => {
     console.info(`🏭 Factory Done`, factoryId, factoryAddress)
 
     // Manager
-    var managerClient = new ManagerClient(cwClient);
-    var [managerId, managerAddress] = await managerClient.deploy(
-        artifactsRoot,
-        userAddress,
-        factoryAddress,
-        pauseAdminAddress,
-        treasuryAddress,
-        uploadGas,
-        executeGas
-    );
+    let managerClient = new ManagerClient(cwClient);
+    let managerId, managerAddress
+    try {
+        [managerId, managerAddress] = await managerClient.deploy(
+            artifactsRoot,
+            userAddress,
+            factoryAddress,
+            pauseAdminAddress,
+            treasuryAddress,
+            uploadGas,
+            executeGas
+        );
+    } catch (e) {
+        console.error('Manager unable to deploy. Error:', e)
+    }
     console.info(`🏗️  Manager Done`, managerId, managerAddress)
 
     // Tasks
