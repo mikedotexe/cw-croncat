@@ -352,10 +352,24 @@ pub struct TaskResponse {
 #[cw_serde]
 pub struct TaskExecutionInfo {
     pub block_height: u64,
+    pub tx_index: u32,
     pub task_hash: String,
     pub owner_addr: Addr,
     pub amount_for_one_task: AmountForOneTask,
     pub version: String,
+}
+
+impl Default for TaskExecutionInfo {
+    fn default() -> Self {
+        Self {
+            block_height: u64::default(),
+            tx_index: u32::default(),
+            task_hash: String::default(),
+            owner_addr: Addr::unchecked(""),
+            amount_for_one_task: AmountForOneTask::default(),
+            version: String::default(),
+        }
+    }
 }
 
 #[cw_serde]

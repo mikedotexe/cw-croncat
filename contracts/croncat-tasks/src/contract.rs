@@ -459,6 +459,8 @@ fn execute_create_task(
     let agent_new_task_msg = AgentOnTaskCreated {}.into_cosmos_msg(agent_addr)?;
     let response_data = TaskExecutionInfo {
         block_height: env.block.height,
+        // We can safely unwrap since our context is an execute message
+        tx_index: env.transaction.unwrap().index,
         task_hash: hash.clone(),
         owner_addr: item.owner_addr,
         amount_for_one_task: item.amount_for_one_task,

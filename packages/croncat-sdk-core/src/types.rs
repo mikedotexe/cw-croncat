@@ -61,6 +61,7 @@ impl Default for GasPrice {
 }
 
 #[cw_serde]
+#[derive(Default)]
 pub struct AmountForOneTask {
     // Attached balances, used for forwarding during actions
     pub cw20: Option<Cw20CoinVerified>,

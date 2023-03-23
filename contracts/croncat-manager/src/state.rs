@@ -4,6 +4,7 @@ use croncat_sdk_manager::types::TaskBalance;
 use cw_storage_plus::{Item, Map};
 
 pub use croncat_sdk_manager::types::Config;
+use croncat_sdk_tasks::types::TaskExecutionInfo;
 
 pub const CONFIG: Item<Config> = Item::new("config");
 
@@ -24,6 +25,8 @@ pub const TEMP_BALANCES_CW20: Map<(&Addr, &Addr), Uint128> = Map::new("temp_bala
 pub const TASKS_BALANCES: Map<&[u8], TaskBalance> = Map::new("tasks_balances");
 
 pub const REPLY_QUEUE: Item<QueueItem> = Item::new("reply_queue");
+
+pub const LAST_TASK_EXECUTION_INFO: Item<TaskExecutionInfo> = Item::new("last_task_execution_info");
 
 /// This struct will keep the task and who is doing it until the last action
 #[cw_serde]

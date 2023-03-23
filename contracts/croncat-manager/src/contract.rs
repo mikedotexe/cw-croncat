@@ -8,7 +8,7 @@ use croncat_sdk_core::internal_messages::agents::AgentWithdrawOnRemovalArgs;
 use croncat_sdk_core::internal_messages::manager::{ManagerCreateTaskBalance, ManagerRemoveTask};
 use croncat_sdk_manager::msg::AgentWithdrawCallback;
 use croncat_sdk_manager::types::{TaskBalance, TaskBalanceResponse, UpdateConfig};
-use croncat_sdk_tasks::types::{Interval, Task, TaskInfo};
+use croncat_sdk_tasks::types::{Interval, Task, TaskExecutionInfo, TaskInfo};
 use cw2::set_contract_version;
 use cw_utils::{may_pay, parse_reply_execute_data};
 
@@ -26,7 +26,8 @@ use crate::helpers::{
 };
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{
-    Config, QueueItem, AGENT_REWARDS, CONFIG, PAUSED, REPLY_QUEUE, TASKS_BALANCES, TREASURY_BALANCE,
+    Config, QueueItem, AGENT_REWARDS, CONFIG, LAST_TASK_EXECUTION_INFO, PAUSED, REPLY_QUEUE,
+    TASKS_BALANCES, TREASURY_BALANCE,
 };
 use crate::ContractError::InvalidPercentage;
 
@@ -115,6 +116,7 @@ pub fn instantiate(
     // Update state
     CONFIG.save(deps.storage, &config)?;
     PAUSED.save(deps.storage, &false)?;
+    LAST_TASK_EXECUTION_INFO.save(deps.storage, &TaskExecutionInfo::default())?;
     set_contract_version(
         deps.storage,
         CONTRACT_NAME,
@@ -327,12 +329,29 @@ fn execute_proxy_call(
 
     let sub_msgs = task_sub_msgs(&task);
     let queue_item = QueueItem {
-        task,
+        task: task.clone(),
         agent_addr,
         failures: Default::default(),
     };
 
     REPLY_QUEUE.save(deps.storage, &queue_item)?;
+
+    // Save latest task execution info
+    // This is a simple register, allowing the receiving contract to query
+    // and discover details about the latest task sent
+
+    let last_task_execution_info = TaskExecutionInfo {
+        block_height: env.block.height,
+        // We can safely unwrap since our context is an execute message
+        tx_index: env.transaction.unwrap().index,
+        task_hash: task.task_hash,
+        owner_addr: task.owner_addr,
+        amount_for_one_task: task.amount_for_one_task,
+        version: task_version,
+    };
+
+    LAST_TASK_EXECUTION_INFO.save(deps.storage, &last_task_execution_info)?;
+
     Ok(Response::new()
         .add_attribute("action", "proxy_call")
         .add_submessages(sub_msgs))
