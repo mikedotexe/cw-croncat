@@ -13,3 +13,10 @@ pub mod reply_handler;
 pub mod types;
 
 pub use croncat_sdk_tasks::types::TaskExecutionInfo as CronCatTaskExecutionInfo;
+
+#[macro_export]
+macro_rules! reply_complete_task_creation {
+    ($task_info:expr) => {
+        reply_complete_task_creation($task_info).map_err(|err| ContractError::CronCatError { err })
+    };
+}

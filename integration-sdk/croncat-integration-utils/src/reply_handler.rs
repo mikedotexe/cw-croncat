@@ -36,6 +36,7 @@ pub fn reply_handle_task_creation(
 
 /// This helps return a format of the latest [task execution info](croncat_sdk_tasks::types::TaskExecutionInfo).
 /// Return a JSON representation in the Response's data.
+#[deprecated(since = "1.0.0", note = "Please use the improved reply_complete_task_creation macro instead")]
 pub fn reply_complete_task_creation(
     created_task_info: CronCatTaskExecutionInfo,
 ) -> Result<Response, CronCatContractError> {
