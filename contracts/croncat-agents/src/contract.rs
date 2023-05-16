@@ -624,6 +624,8 @@ pub fn execute_update_config(
     Ok(Response::new().add_attribute("action", "update_config"))
 }
 
+/// Note that we ran into problems with clippy here
+#[allow(clippy::op_ref)]
 fn get_agent_status(
     storage: &dyn Storage,
     env: Env,

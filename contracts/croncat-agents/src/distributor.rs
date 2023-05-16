@@ -36,6 +36,9 @@ impl AgentTaskDistributor {
         AgentTaskDistributor {}
     }
 }
+
+/// Note that we ran into problems with clippy here
+#[allow(clippy::op_ref)]
 impl<'a> RoundRobinAgentTaskDistributor<'a> for AgentTaskDistributor {
     fn get_agent_tasks(
         &self,
