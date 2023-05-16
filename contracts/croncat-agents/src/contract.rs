@@ -637,7 +637,7 @@ fn get_agent_status(
     // If agent is pending, Check if they should get nominated to checkin to become active
     let agent_position = if let Some(pos) = pending_iter.position(|address| {
         if let Ok(addr) = address {
-            addr == account_id
+            &addr == account_id
         } else {
             false
         }

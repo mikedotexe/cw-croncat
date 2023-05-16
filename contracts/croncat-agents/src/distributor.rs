@@ -85,7 +85,7 @@ impl<'a> RoundRobinAgentTaskDistributor<'a> for AgentTaskDistributor {
             });
             let agent_diff_index = active
                 .iter()
-                .position(|x| x == agent_id)
+                .position(|x| x == &agent_id)
                 .ok_or(ContractError::AgentNotRegistered {})?
                 as u64;
 
