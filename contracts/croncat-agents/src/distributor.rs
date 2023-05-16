@@ -38,6 +38,7 @@ impl AgentTaskDistributor {
 }
 
 /// Note that we ran into problems with clippy here
+/// See <https://github.com/CronCats/cw-croncat/pull/415>
 #[allow(clippy::op_ref)]
 impl<'a> RoundRobinAgentTaskDistributor<'a> for AgentTaskDistributor {
     fn get_agent_tasks(

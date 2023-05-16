@@ -625,6 +625,7 @@ pub fn execute_update_config(
 }
 
 /// Note that we ran into problems with clippy here
+/// See https://github.com/CronCats/cw-croncat/pull/415
 #[allow(clippy::op_ref)]
 fn get_agent_status(
     storage: &dyn Storage,
