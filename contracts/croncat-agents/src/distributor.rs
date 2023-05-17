@@ -36,6 +36,10 @@ impl AgentTaskDistributor {
         AgentTaskDistributor {}
     }
 }
+
+/// Note that we ran into problems with clippy here
+/// See <https://github.com/CronCats/cw-croncat/pull/415>
+#[allow(clippy::op_ref)]
 impl<'a> RoundRobinAgentTaskDistributor<'a> for AgentTaskDistributor {
     fn get_agent_tasks(
         &self,
@@ -85,7 +89,7 @@ impl<'a> RoundRobinAgentTaskDistributor<'a> for AgentTaskDistributor {
             });
             let agent_diff_index = active
                 .iter()
-                .position(|x| x == agent_id)
+                .position(|x| x == &agent_id)
                 .ok_or(ContractError::AgentNotRegistered {})?
                 as u64;
 

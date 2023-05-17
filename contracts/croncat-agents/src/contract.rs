@@ -624,6 +624,9 @@ pub fn execute_update_config(
     Ok(Response::new().add_attribute("action", "update_config"))
 }
 
+/// Note that we ran into problems with clippy here
+/// See https://github.com/CronCats/cw-croncat/pull/415
+#[allow(clippy::op_ref)]
 fn get_agent_status(
     storage: &dyn Storage,
     env: Env,
@@ -637,7 +640,7 @@ fn get_agent_status(
     // If agent is pending, Check if they should get nominated to checkin to become active
     let agent_position = if let Some(pos) = pending_iter.position(|address| {
         if let Ok(addr) = address {
-            addr == account_id
+            &addr == account_id
         } else {
             false
         }
