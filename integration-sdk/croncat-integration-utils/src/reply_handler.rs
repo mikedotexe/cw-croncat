@@ -1,6 +1,6 @@
 use crate::error::CronCatContractError;
-use crate::{CronCatTaskExecutionInfo, REPLY_CRONCAT_TASK_CREATION};
-use cosmwasm_std::{Binary, Reply, Uint64};
+use crate::CronCatTaskExecutionInfo;
+use cosmwasm_std::{from_binary, Binary, Reply};
 use cw_utils::parse_reply_execute_data;
 
 /// Reply handler when a contract calls [`create_task`](croncat_sdk_tasks::msg::TasksExecuteMsg::CreateTask).
@@ -8,24 +8,16 @@ use cw_utils::parse_reply_execute_data;
 pub fn reply_handle_croncat_task_creation(
     msg: Reply,
 ) -> Result<(CronCatTaskExecutionInfo, Binary), CronCatContractError> {
+    let reply_id = msg.id;
     if msg.clone().result.into_result().is_err() {
-        return Err(CronCatContractError::ReplyError {
-            reply_id: REPLY_CRONCAT_TASK_CREATION.into(),
-        });
+        return Err(CronCatContractError::ReplyError { reply_id });
     }
 
-    let msg_parsed = parse_reply_execute_data(msg);
-    let msg_binary = msg_parsed.unwrap().data.unwrap();
-
-    let created_task_info_res = serde_json_wasm::from_slice(msg_binary.as_slice());
-
-    if created_task_info_res.is_err() {
-        return Err(CronCatContractError::ReplyError {
-            reply_id: Uint64::from(REPLY_CRONCAT_TASK_CREATION),
-        });
-    }
-
-    let created_task_info: CronCatTaskExecutionInfo = created_task_info_res.unwrap();
+    let msg_parsed = parse_reply_execute_data(msg)?;
+    let msg_binary = msg_parsed
+        .data
+        .ok_or(CronCatContractError::ReplyError { reply_id })?;
+    let created_task_info: CronCatTaskExecutionInfo = from_binary(&msg_binary)?;
 
     // We return the newly-created task details
     // in your contract's state if you wish.

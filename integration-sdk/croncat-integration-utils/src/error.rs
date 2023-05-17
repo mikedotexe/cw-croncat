@@ -1,4 +1,5 @@
-use cosmwasm_std::{Addr, StdError, Uint64};
+use cosmwasm_std::{Addr, StdError};
+use cw_utils::ParseReplyError;
 use serde_json::Error as SerdeJsonError;
 use thiserror::Error;
 
@@ -7,8 +8,11 @@ pub enum CronCatContractError {
     #[error("{0}")]
     Std(#[from] StdError),
 
+    #[error("Parse Reply Error {0}")]
+    ParseReplyError(#[from] ParseReplyError),
+
     #[error("Reply {reply_id} failed")]
-    ReplyError { reply_id: Uint64 },
+    ReplyError { reply_id: u64 },
 
     #[error("Failed to retrieve latest task execution info from potential CronCat manager: {manager_addr}")]
     LatestTaskInfoFailed { manager_addr: Addr },
